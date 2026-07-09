@@ -1,0 +1,783 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "",
+    "version": "0.0.0"
+  },
+  "paths": {
+    "/chat/api/conversations": {
+      "get": {
+        "operationId": "chat_api_conversations_list",
+        "description": "List the requesting user's conversations, or create one.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "name": "anchor",
+            "required": false,
+            "in": "query",
+            "description": "Anchor value to paginate from (exclusive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "direction",
+            "required": false,
+            "in": "query",
+            "description": "Pagination direction",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "next",
+                "prev",
+                "center"
+              ],
+              "default": "next"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Number of items (default 50, max 200)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedConversationResponseList"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "chat_api_conversations_create",
+        "description": "List the requesting user's conversations, or create one.\n\n**Permissions:** `IsAuthenticated`",
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/chat/api/conversations/{conversation_id}": {
+      "get": {
+        "operationId": "chat_api_conversations_retrieve",
+        "description": "Retrieve a single conversation (participant-only).\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/chat/api/conversations/{conversation_id}/messages": {
+      "get": {
+        "operationId": "chat_api_conversations_messages_list",
+        "description": "History (anchor by seq, both directions) or send a message.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "name": "anchor",
+            "required": false,
+            "in": "query",
+            "description": "Anchor value to paginate from (exclusive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "direction",
+            "required": false,
+            "in": "query",
+            "description": "Pagination direction",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "next",
+                "prev",
+                "center"
+              ],
+              "default": "next"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Number of items (default 50, max 200)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedMessageResponseList"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "chat_api_conversations_messages_create",
+        "description": "History (anchor by seq, both directions) or send a message.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/chat/api/conversations/{conversation_id}/read": {
+      "post": {
+        "operationId": "chat_api_conversations_read_create",
+        "description": "Advance the requesting user's read marker in a conversation.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "No response body"
+          }
+        }
+      }
+    },
+    "/chat/api/support/conversations/{conversation_id}/assign": {
+      "post": {
+        "operationId": "chat_api_support_conversations_assign_create",
+        "description": "Assign the requesting user (as operator) to a support conversation.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat support"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/chat/api/support/conversations/{conversation_id}/reopen": {
+      "post": {
+        "operationId": "chat_api_support_conversations_reopen_create",
+        "description": "Reopen a resolved support conversation.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat support"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/chat/api/support/conversations/{conversation_id}/resolve": {
+      "post": {
+        "operationId": "chat_api_support_conversations_resolve_create",
+        "description": "Mark a support conversation resolved.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat support"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
+    "/chat/api/support/queue": {
+      "get": {
+        "operationId": "chat_api_support_queue_list",
+        "description": "The queue of unassigned, still-active support conversations.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "name": "anchor",
+            "required": false,
+            "in": "query",
+            "description": "Anchor value to paginate from (exclusive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "direction",
+            "required": false,
+            "in": "query",
+            "description": "Pagination direction",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "next",
+                "prev",
+                "center"
+              ],
+              "default": "next"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Number of items (default 50, max 200)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "tags": [
+          "Chat support"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedConversationResponseList"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ConversationResponse": {
+        "type": "object",
+        "description": "A conversation (thread).",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Conversation id (UUID)"
+          },
+          "kind": {
+            "type": "string",
+            "description": "``direct`` / ``group`` / ``support``"
+          },
+          "scope_key": {
+            "type": "string",
+            "description": "Opaque host scope (workspace/org/tenant)"
+          },
+          "support_status": {
+            "type": "string",
+            "description": "``open`` / ``pending`` / ``resolved`` (empty for"
+          },
+          "last_seq": {
+            "type": "integer",
+            "description": "High-water mark of message seq in this conversation"
+          },
+          "unread_count": {
+            "type": "integer",
+            "description": "Messages newer than the requesting user's read marker,"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last-activity time"
+          },
+          "assigned_operator_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Assigned support operator, if any"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParticipantResponse"
+            },
+            "description": "The conversation's participants"
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "kind",
+          "last_seq",
+          "scope_key",
+          "support_status",
+          "unread_count",
+          "updated_at"
+        ]
+      },
+      "CreateConversationRequest": {
+        "type": "object",
+        "description": "Create a conversation.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "``direct`` / ``group`` / ``support``. For ``direct`` supply"
+          },
+          "participant_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Other participants to add (the requesting user is"
+          },
+          "scope_key": {
+            "type": "string",
+            "description": "Ignored — the scope is resolved server-side from the"
+          }
+        }
+      },
+      "MarkReadRequest": {
+        "type": "object",
+        "description": "Advance the requesting user's read marker.",
+        "properties": {
+          "upto_seq": {
+            "type": "integer",
+            "description": "seq of the newest message now considered read"
+          }
+        },
+        "required": [
+          "upto_seq"
+        ]
+      },
+      "MessageResponse": {
+        "type": "object",
+        "description": "A single message.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Message id (UUID)"
+          },
+          "conversation_id": {
+            "type": "string",
+            "description": "Owning conversation id"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "Monotonic per-conversation order key"
+          },
+          "kind": {
+            "type": "string",
+            "description": "``text`` or ``system``"
+          },
+          "body": {
+            "type": "string",
+            "description": "Message text (may be empty when only attachments are present)"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time (tz-aware ISO 8601)"
+          },
+          "sender_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Author's user id (null for system messages)"
+          },
+          "reply_to": {
+            "type": "string",
+            "nullable": true,
+            "description": "Quoted message id, if any"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Opaque attachment keys (files live in the host CDN)"
+          }
+        },
+        "required": [
+          "body",
+          "conversation_id",
+          "created_at",
+          "id",
+          "kind",
+          "seq"
+        ]
+      },
+      "PaginatedConversationResponseList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversationResponse"
+            }
+          },
+          "next_anchor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Anchor value for next page"
+          },
+          "prev_anchor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Anchor value for previous page"
+          },
+          "has_next": {
+            "type": "boolean",
+            "description": "Whether there are more items after this page"
+          },
+          "has_prev": {
+            "type": "boolean",
+            "description": "Whether there are items before this page"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of items in current page"
+          }
+        },
+        "required": [
+          "items",
+          "has_next",
+          "has_prev",
+          "count"
+        ]
+      },
+      "PaginatedMessageResponseList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            }
+          },
+          "next_anchor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Anchor value for next page"
+          },
+          "prev_anchor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Anchor value for previous page"
+          },
+          "has_next": {
+            "type": "boolean",
+            "description": "Whether there are more items after this page"
+          },
+          "has_prev": {
+            "type": "boolean",
+            "description": "Whether there are items before this page"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of items in current page"
+          }
+        },
+        "required": [
+          "items",
+          "has_next",
+          "has_prev",
+          "count"
+        ]
+      },
+      "ParticipantResponse": {
+        "type": "object",
+        "description": "A conversation participant.",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "The participant's user id"
+          },
+          "role": {
+            "type": "string",
+            "description": "``member`` or ``operator``"
+          },
+          "last_read_seq": {
+            "type": "integer",
+            "description": "seq of the newest message this participant has read"
+          }
+        },
+        "required": [
+          "last_read_seq",
+          "role",
+          "user_id"
+        ]
+      },
+      "SendMessageRequest": {
+        "type": "object",
+        "description": "Post a message.",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "Message text (required unless attachments are supplied)"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Opaque attachment keys (host CDN references)"
+          },
+          "reply_to": {
+            "type": "string",
+            "nullable": true,
+            "description": "Message id being replied to (must be in this conversation)"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "JWTCookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "stapel_jwt",
+        "description": "JWT token stored in cookie. Login via /auth/admin/ to get the cookie."
+      }
+    }
+  }
+}

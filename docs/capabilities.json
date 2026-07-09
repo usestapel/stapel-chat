@@ -1,0 +1,96 @@
+{
+  "module": "stapel-chat",
+  "version": "0.1.0",
+  "provides": "Conversations and messaging: direct (1:1, idempotent by participant pair), group and support threads on one model; text/system messages with a monotonic per-conversation seq, replies and opaque CDN attachment keys; per-participant read markers and unread counts; anchor-paginated history (canonical anchor=seq) and conversation lists; a support layer (unassigned queue, first-come assignment, open/pending/resolved with reopen); and an optional Channels consumer for realtime delivery with seq-replay resume.",
+  "axes": [
+    {
+      "key": "CHAT_KINDS",
+      "kind": "list",
+      "default": [
+        "direct",
+        "group",
+        "support"
+      ],
+      "group": "chat.kinds",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "A create/operate request for a kind not in CHAT_KINDS is rejected (400); the support queue/assign/resolve/reopen endpoints answer 400 when \"support\" is not enabled."
+      },
+      "curated": {
+        "summary": "The enabled subset of direct (1:1), group and support threads. Drop \"support\" to run a pure peer-to-peer chat with no operator queue or assignment; drop \"group\" to allow only 1:1 direct threads. Creating (or, for support, operating on) a kind that is not enabled is refused. Values: any non-empty subset of direct, group, support.",
+        "business_label": "Which conversation types are offered"
+      }
+    },
+    {
+      "key": "ATTACHMENTS",
+      "kind": "bool",
+      "default": true,
+      "group": "chat.attachments",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "off: a message with a non-empty attachments list is rejected (400); on: attachment keys are accepted and stored on the message."
+      },
+      "curated": {
+        "summary": "When on, a message may carry a list of opaque attachment keys (the files live in the host's CDN/storage; the module stores only the keys). When off, any message with an attachment is rejected. Text is always allowed.",
+        "business_label": "Allow message attachments"
+      }
+    },
+    {
+      "key": "MAX_BODY_LENGTH",
+      "kind": "enum",
+      "default": 4000,
+      "group": "chat.limits",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "A body longer than MAX_BODY_LENGTH characters is rejected (400) at the API boundary."
+      },
+      "curated": {
+        "summary": "Hard cap, in characters, on a single text message body. A longer body is rejected before it is stored. Raise it for long-form support replies, lower it for terse chat.",
+        "business_label": "Maximum message length"
+      }
+    }
+  ],
+  "extension_points": [
+    {
+      "name": "SCOPE_PROVIDER",
+      "kind": "dotted_path",
+      "summary": "Swap how the opaque scope_key (workspace/org/tenant) is resolved from the request and enforced on querysets — the default is a single global scope; a host may return the active workspace_id so conversations are partitioned per tenant."
+    },
+    {
+      "name": "chat.message",
+      "kind": "comm_event",
+      "summary": "Emitted (transactionally, via the outbox) whenever a message is appended. Realtime delivery, search indexing and notifications subscribe without any coupling in the engine."
+    },
+    {
+      "name": "chat.support.assigned",
+      "kind": "comm_event",
+      "summary": "Emitted when a support conversation is claimed by an operator — routing and operator-notification layers subscribe."
+    },
+    {
+      "name": "serializer_seams",
+      "kind": "class_override",
+      "summary": "Every view declares request/response serializer seams (SerializerSeamMixin) — subclass the view, override the attribute, remount the URL."
+    }
+  ],
+  "operations_total": 10,
+  "requires": [
+    {
+      "module": "stapel-core",
+      "optional": false,
+      "reason": "comm bus (chat.message / chat.support.assigned emits via the outbox), JWT authentication (HTTP + optional Channels), AppSettings config layer, anchor pagination"
+    },
+    {
+      "module": "stapel-auth",
+      "optional": true,
+      "reason": "every endpoint requires an authenticated user (IsAuthenticated); stapel-auth is the shelf's session issuer — any stapel-core-compatible JWT issuer satisfies the check"
+    },
+    {
+      "module": "stapel-cdn",
+      "optional": true,
+      "reason": "messages carry opaque attachment keys only; a file/CDN module (or any host storage) owns the bytes those keys point at"
+    }
+  ]
+}
