@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stapel-chat"
+version = "0.1.0"
+description = "Conversations, messaging and support chat for the Stapel framework"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+keywords = ["django", "stapel", "chat", "messaging", "support"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = [
+    "stapel-core>=0.9,<0.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/usestapel/stapel-chat"
+Repository = "https://github.com/usestapel/stapel-chat"
+Documentation = "https://github.com/usestapel/stapel-chat#readme"
+Changelog = "https://github.com/usestapel/stapel-chat/blob/main/CHANGELOG.md"
+Issues = "https://github.com/usestapel/stapel-chat/issues"
+
+[project.optional-dependencies]
+# Realtime delivery is optional — the module is correct (replay by seq) without
+# it. Install to run the Channels consumer (stapel_chat.consumers.ChatConsumer).
+channels = ["stapel-core[channels]>=0.9,<0.10"]
+all = ["stapel-core[channels]>=0.9,<0.10"]
+
+[tool.setuptools]
+package-dir = {"stapel_chat" = "."}
+packages = ["stapel_chat", "stapel_chat.migrations"]
+
+[tool.setuptools.package-data]
+stapel_chat = ["py.typed", "migrations/*.py", "schemas/**/*.json"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# Single source for the git hooks and CI (they pass the same flags on the CLI).
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+django_find_project = false
+addopts = "--tb=short -q --import-mode=importlib"
+
+[tool.coverage.run]
+omit = [
+    "*/tests/*",
+    "*/conftest.py",
+    "*/migrations/*",
+]

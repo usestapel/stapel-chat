@@ -1,0 +1,87 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install stapel-core (with channels extra for realtime)
+        run: pip install "stapel-core[channels] @ git+https://github.com/usestapel/stapel-core.git"
+
+      - name: Install
+        run: pip install -e ".[all]" || pip install -e .
+
+      - name: Lint
+        run: |
+          pip install ruff --quiet
+          ruff check . --select E,F,W --ignore E501
+
+      - name: migration-lint (expand/contract gate, release-management.md §3)
+        run: |
+          pip install "stapel-tools>=0.9.1,<1" --quiet
+          stapel-migration-lint . --strict
+
+      - name: Import check
+        run: python -c "import stapel_chat; print('import OK')"
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-django pytest-asyncio pytest-cov channels "stapel-tools>=0.9.1,<1"
+
+      - name: Tests with coverage
+        run: |
+          pytest tests/ \
+            --cov=stapel_chat \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --junitxml=junit.xml \
+            -o junit_family=legacy \
+            -v
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        with:
+          files: coverage.xml
+          flags: stapel-chat
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        uses: codecov/test-results-action@v1
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  release-track:
+    # Release gate — library-standard §7.4. Installs the package the way an end
+    # user does: dependencies (incl. stapel-core) resolved from PyPI strictly by
+    # the declared pins — no git-main core, no editable siblings.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install as an end user (deps resolved from PyPI by pin)
+        run: pip install .
+      - name: Verify stapel-core resolved from PyPI inside the 0.9 window
+        run: cd "$RUNNER_TEMP" && python -c "import importlib.metadata as m; v=m.version('stapel-core'); print('stapel-core', v); assert tuple(map(int, v.split('.')[:2]))==(0,9), v"
+      - name: Import smoke (installed package, from a clean dir)
+        run: cd "$RUNNER_TEMP" && python -c "import stapel_chat; print('release-track import OK')"
