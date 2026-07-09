@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "chat.support.assigned",
+  "description": "A support conversation was assigned to an operator (first-come). Routing/notification layers subscribe to alert the operator and update queues.",
+  "type": "object",
+  "required": ["conversation_id", "operator_id"],
+  "properties": {
+    "conversation_id": { "type": "string", "format": "uuid" },
+    "operator_id":     { "type": "string" },
+    "scope_key":       { "type": "string" }
+  },
+  "additionalProperties": true
+}
