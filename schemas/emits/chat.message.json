@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "chat.message",
+  "description": "A message was appended to a conversation, written into the outbox in the same transaction as the row. Realtime consumers deliver it; downstreams (search index, notifier) subscribe. Ordered by the monotonic per-conversation seq.",
+  "type": "object",
+  "required": ["message_id", "conversation_id", "seq", "kind", "created_at"],
+  "properties": {
+    "message_id":        { "type": "string", "format": "uuid" },
+    "conversation_id":   { "type": "string", "format": "uuid" },
+    "conversation_kind": { "type": "string", "enum": ["direct", "group", "support"] },
+    "scope_key":         { "type": "string" },
+    "sender_id":         { "type": ["string", "null"] },
+    "seq":               { "type": "integer", "minimum": 1 },
+    "kind":              { "type": "string", "enum": ["text", "system"] },
+    "body":              { "type": "string" },
+    "reply_to":          { "type": ["string", "null"] },
+    "attachments":       { "type": "array", "items": { "type": "string" } },
+    "created_at":        { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": true
+}
