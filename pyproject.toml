@@ -23,7 +23,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "stapel-core>=0.9,<0.10",
+    "stapel-core>=0.10,<0.11",
 ]
 
 [project.urls]
@@ -36,8 +36,8 @@ Issues = "https://github.com/usestapel/stapel-chat/issues"
 [project.optional-dependencies]
 # Realtime delivery is optional — the module is correct (replay by seq) without
 # it. Install to run the Channels consumer (stapel_chat.consumers.ChatConsumer).
-channels = ["stapel-core[channels]>=0.9,<0.10"]
-all = ["stapel-core[channels]>=0.9,<0.10"]
+channels = ["stapel-core[channels]>=0.10,<0.11"]
+all = ["stapel-core[channels]>=0.10,<0.11"]
 
 [tool.setuptools]
 package-dir = {"stapel_chat" = "."}
