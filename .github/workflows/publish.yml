@@ -33,7 +33,7 @@ jobs:
         run: python -c "import stapel_chat; print('import OK')"
 
       - name: Install test dependencies
-        run: pip install pytest pytest-django pytest-asyncio pytest-cov channels "stapel-tools>=0.9.1,<1"
+        run: pip install pytest pytest-django pytest-asyncio pytest-cov channels daphne "stapel-tools>=0.9.1,<1"
 
       - name: Tests with coverage
         run: |

@@ -40,7 +40,7 @@ jobs:
         run: python -c "import stapel_chat; print('import OK')"
 
       - name: Install test dependencies
-        run: pip install pytest pytest-django pytest-asyncio pytest-cov channels "stapel-tools>=0.9.1,<1"
+        run: pip install pytest pytest-django pytest-asyncio pytest-cov channels daphne "stapel-tools>=0.9.1,<1"
 
       - name: Tests with coverage
         run: |
@@ -81,7 +81,7 @@ jobs:
           cache: pip
       - name: Install as an end user (deps resolved from PyPI by pin)
         run: pip install .
-      - name: Verify stapel-core resolved from PyPI inside the 0.9 window
-        run: cd "$RUNNER_TEMP" && python -c "import importlib.metadata as m; v=m.version('stapel-core'); print('stapel-core', v); assert tuple(map(int, v.split('.')[:2]))==(0,9), v"
+      - name: Verify stapel-core resolved from PyPI inside the 0.10 window
+        run: cd "$RUNNER_TEMP" && python -c "import importlib.metadata as m; v=m.version('stapel-core'); print('stapel-core', v); assert tuple(map(int, v.split('.')[:2]))==(0,10), v"
       - name: Import smoke (installed package, from a clean dir)
         run: cd "$RUNNER_TEMP" && python -c "import stapel_chat; print('release-track import OK')"
