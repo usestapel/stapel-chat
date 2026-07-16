@@ -4,6 +4,15 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-07-17
+
+### Changed
+- `stapel-core` ceiling raised `>=0.10,<0.11` → `>=0.10,<0.12` in both the
+  base dependency and the `channels` extra (core 0.11 fleet re-pin:
+  default bus, nav, config-checks, error params/language — additive for
+  modules).
+- Contract artifacts regenerated (version bump); no other drift.
+
 ## [0.1.0] - 2026-07-10
 
 Initial alpha release.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-chat"
-version = "0.1.1"
+version = "0.1.2"
 description = "Conversations, messaging and support chat for the Stapel framework"
 readme = "README.md"
 license = { text = "MIT" }
@@ -23,7 +23,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "stapel-core>=0.10,<0.11",
+    "stapel-core>=0.10,<0.12",
 ]
 
 [project.urls]
@@ -36,8 +36,8 @@ Issues = "https://github.com/usestapel/stapel-chat/issues"
 [project.optional-dependencies]
 # Realtime delivery is optional — the module is correct (replay by seq) without
 # it. Install to run the Channels consumer (stapel_chat.consumers.ChatConsumer).
-channels = ["stapel-core[channels]>=0.10,<0.11"]
-all = ["stapel-core[channels]>=0.10,<0.11"]
+channels = ["stapel-core[channels]>=0.10,<0.12"]
+all = ["stapel-core[channels]>=0.10,<0.12"]
 
 [tool.setuptools]
 package-dir = {"stapel_chat" = "."}
