@@ -9,8 +9,8 @@ from stapel_chat.models import Conversation, ConversationKind
 class TestCreate:
     def test_direct_is_idempotent_over_http(self, auth_client, other_user):
         payload = {"kind": "direct", "participant_ids": [str(other_user.id)]}
-        r1 = auth_client.post("/chat/api/conversations", payload, format="json")
-        r2 = auth_client.post("/chat/api/conversations", payload, format="json")
+        r1 = auth_client.post("/chat/api/v1/conversations", payload, format="json")
+        r2 = auth_client.post("/chat/api/v1/conversations", payload, format="json")
         assert r1.status_code == 201 and r2.status_code == 201
         assert r1.json()["id"] == r2.json()["id"]
         assert Conversation.objects.filter(kind=ConversationKind.DIRECT).count() == 1
@@ -23,21 +23,21 @@ class TestCreate:
     def test_direct_requires_exactly_one_other(self, auth_client, user, other_user):
         # zero others
         r = auth_client.post(
-            "/chat/api/conversations", {"kind": "direct", "participant_ids": []},
+            "/chat/api/v1/conversations", {"kind": "direct", "participant_ids": []},
             format="json",
         )
         assert r.status_code == 400
         assert r.json()["localizable_error"] == "error.400.chat_invalid_direct"
         # self only -> filtered out -> still zero
         r = auth_client.post(
-            "/chat/api/conversations",
+            "/chat/api/v1/conversations",
             {"kind": "direct", "participant_ids": [str(user.id)]}, format="json",
         )
         assert r.status_code == 400
 
     def test_group_creation_adds_owner_and_members(self, auth_client, user, other_user):
         r = auth_client.post(
-            "/chat/api/conversations",
+            "/chat/api/v1/conversations",
             {"kind": "group", "participant_ids": [str(other_user.id)]}, format="json",
         )
         assert r.status_code == 201
@@ -46,7 +46,7 @@ class TestCreate:
 
     def test_support_creation_opens_thread(self, auth_client, user):
         r = auth_client.post(
-            "/chat/api/conversations", {"kind": "support"}, format="json"
+            "/chat/api/v1/conversations", {"kind": "support"}, format="json"
         )
         assert r.status_code == 201
         body = r.json()
@@ -56,7 +56,7 @@ class TestCreate:
 
     def test_unknown_kind_rejected(self, auth_client):
         r = auth_client.post(
-            "/chat/api/conversations", {"kind": "telepathy"}, format="json"
+            "/chat/api/v1/conversations", {"kind": "telepathy"}, format="json"
         )
         assert r.status_code == 400
         assert r.json()["localizable_error"] == "error.400.chat_invalid_kind"
@@ -64,7 +64,7 @@ class TestCreate:
     def test_disabled_kind_rejected(self, auth_client, settings):
         settings.STAPEL_CHAT = {"CHAT_KINDS": ["direct", "group"]}
         r = auth_client.post(
-            "/chat/api/conversations", {"kind": "support"}, format="json"
+            "/chat/api/v1/conversations", {"kind": "support"}, format="json"
         )
         assert r.status_code == 400
         assert r.json()["localizable_error"] == "error.400.chat_kind_disabled"
@@ -79,7 +79,7 @@ class TestListAndDetail:
         # other_user posts two messages -> unread for `user` is 2.
         services.post_message(conversation=conv, sender=other_user, body="hi")
         services.post_message(conversation=conv, sender=other_user, body="there")
-        r = auth_client.get("/chat/api/conversations")
+        r = auth_client.get("/chat/api/v1/conversations")
         assert r.status_code == 200
         items = r.json()["items"]
         assert len(items) == 1
@@ -90,12 +90,12 @@ class TestListAndDetail:
         # A conversation `user` is not part of.
         conv = services.create_group(owner=other_user)
         api_client.force_authenticate(user=user)
-        r = api_client.get(f"/chat/api/conversations/{conv.id}")
+        r = api_client.get(f"/chat/api/v1/conversations/{conv.id}")
         assert r.status_code == 403
         assert r.json()["localizable_error"] == "error.403.chat_not_participant"
 
     def test_detail_missing_is_404(self, auth_client):
         import uuid
 
-        r = auth_client.get(f"/chat/api/conversations/{uuid.uuid4()}")
+        r = auth_client.get(f"/chat/api/v1/conversations/{uuid.uuid4()}")
         assert r.status_code == 404

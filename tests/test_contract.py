@@ -3,7 +3,7 @@
 stapel-chat emits its **own** contract triad — ``docs/schema.json``,
 ``docs/flows.json`` ([] — no ``@flow_step``) and ``docs/errors.json`` — plus
 ``docs/capabilities.json``, from a single-module ``{chat + core}`` Django
-instance mounted at the canonical ``/chat/api/`` prefix.
+instance mounted at the canonical ``/chat/api/v1/`` prefix.
 
 Chat is not yet mounted in stapel-example-monolith, so there is no aggregate
 slice to diff against for byte-identity (contract-pipeline.md §9 fallback):
@@ -78,8 +78,8 @@ def test_emission_is_deterministic(tmp_path):
 def test_paths_carry_canonical_prefix():
     schema = json.loads((DOCS / "schema.json").read_text())
     assert schema["paths"], "schema has no paths"
-    assert all(p.startswith("/chat/api/") for p in schema["paths"]), (
-        "schema paths are not mounted at the canonical /chat/api/ prefix"
+    assert all(p.startswith("/chat/api/v1/") for p in schema["paths"]), (
+        "schema paths are not mounted at the canonical /chat/api/v1/ prefix"
     )
 
 

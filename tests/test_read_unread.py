@@ -41,7 +41,7 @@ class TestReadUnread:
             services.post_message(conversation=conv, sender=other_user, body="x")
         # Mark read up to seq 2.
         r = auth_client.post(
-            f"/chat/api/conversations/{conv.id}/read", {"upto_seq": 2}, format="json"
+            f"/chat/api/v1/conversations/{conv.id}/read", {"upto_seq": 2}, format="json"
         )
         assert r.status_code == 200 and r.json()["updated"] is True
         assert services.unread_count(
@@ -49,7 +49,7 @@ class TestReadUnread:
         ) == 1
         # A lower mark is a no-op (never regresses).
         r = auth_client.post(
-            f"/chat/api/conversations/{conv.id}/read", {"upto_seq": 1}, format="json"
+            f"/chat/api/v1/conversations/{conv.id}/read", {"upto_seq": 1}, format="json"
         )
         assert r.json()["updated"] is False
         p = self._participant(conv, user)
@@ -59,6 +59,6 @@ class TestReadUnread:
         conv = services.create_group(owner=other_user)
         api_client.force_authenticate(user=user)
         r = api_client.post(
-            f"/chat/api/conversations/{conv.id}/read", {"upto_seq": 1}, format="json"
+            f"/chat/api/v1/conversations/{conv.id}/read", {"upto_seq": 1}, format="json"
         )
         assert r.status_code == 403

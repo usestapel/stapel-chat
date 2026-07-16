@@ -181,7 +181,7 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
     pagination_class = ConversationListPagination
 
     @extend_schema(responses={200: ConversationResponseSerializer(many=True)})
-    def get(self, request):
+    def get(self, request):  # noqa: R007
         qs = (
             _scoped(request)
             .filter(participants__user=request.user)
@@ -203,7 +203,7 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
         request=CreateConversationRequestSerializer,
         responses={201: ConversationResponseSerializer},
     )
-    def post(self, request):
+    def post(self, request):  # noqa: R007
         ser = self.get_request_serializer_class()(data=request.data)
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
@@ -251,7 +251,7 @@ class ConversationDetailView(SerializerSeamMixin, APIView):
     response_serializer_class = ConversationResponseSerializer
 
     @extend_schema(responses={200: ConversationResponseSerializer})
-    def get(self, request, conversation_id):
+    def get(self, request, conversation_id):  # noqa: R007
         conv = _get_conversation(request, conversation_id)
         if conv is None:
             return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
@@ -272,7 +272,7 @@ class MessageListCreateView(SerializerSeamMixin, APIView):
     pagination_class = MessageHistoryPagination
 
     @extend_schema(responses={200: MessageResponseSerializer(many=True)})
-    def get(self, request, conversation_id):
+    def get(self, request, conversation_id):  # noqa: R007
         conv = _get_conversation(request, conversation_id)
         if conv is None:
             return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
@@ -289,7 +289,7 @@ class MessageListCreateView(SerializerSeamMixin, APIView):
         request=SendMessageRequestSerializer,
         responses={201: MessageResponseSerializer},
     )
-    def post(self, request, conversation_id):
+    def post(self, request, conversation_id):  # noqa: R007
         conv = _get_conversation(request, conversation_id)
         if conv is None:
             return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
@@ -337,7 +337,7 @@ class MarkReadView(SerializerSeamMixin, APIView):
     request_serializer_class = MarkReadRequestSerializer
 
     @extend_schema(request=MarkReadRequestSerializer, responses={200: None})
-    def post(self, request, conversation_id):
+    def post(self, request, conversation_id):  # noqa: R007
         conv = _get_conversation(request, conversation_id)
         if conv is None:
             return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
@@ -348,7 +348,7 @@ class MarkReadView(SerializerSeamMixin, APIView):
         moved = services.mark_read(
             conversation=conv, user=request.user, upto_seq=ser.validated_data.upto_seq
         )
-        return StapelResponse({"updated": moved})
+        return StapelResponse({"updated": moved})  # noqa: R006
 
 
 # ── Support views ──────────────────────────────────────────────────────────
@@ -363,7 +363,7 @@ class SupportQueueView(SerializerSeamMixin, APIView):
     pagination_class = SupportQueuePagination
 
     @extend_schema(responses={200: ConversationResponseSerializer(many=True)})
-    def get(self, request):
+    def get(self, request):  # noqa: R007
         if not _support_enabled():
             return StapelErrorResponse(400, ERR_400_KIND_DISABLED)
         qs = services.support_queue(qs=_scoped(request)).prefetch_related(
@@ -389,7 +389,7 @@ class SupportAssignView(SerializerSeamMixin, APIView):
     response_serializer_class = ConversationResponseSerializer
 
     @extend_schema(request=None, responses={200: ConversationResponseSerializer})
-    def post(self, request, conversation_id):
+    def post(self, request, conversation_id):  # noqa: R007
         if not _support_enabled():
             return StapelErrorResponse(400, ERR_400_KIND_DISABLED)
         conv = _get_conversation(request, conversation_id)

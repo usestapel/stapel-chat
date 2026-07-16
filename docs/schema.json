@@ -5,9 +5,9 @@
     "version": "0.0.0"
   },
   "paths": {
-    "/chat/api/conversations": {
+    "/chat/api/v1/conversations": {
       "get": {
-        "operationId": "chat_api_conversations_list",
+        "operationId": "chat_api_v1_conversations_list",
         "description": "List the requesting user's conversations, or create one.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
@@ -66,7 +66,7 @@
         }
       },
       "post": {
-        "operationId": "chat_api_conversations_create",
+        "operationId": "chat_api_v1_conversations_create",
         "description": "List the requesting user's conversations, or create one.\n\n**Permissions:** `IsAuthenticated`",
         "tags": [
           "Chat"
@@ -109,9 +109,9 @@
         }
       }
     },
-    "/chat/api/conversations/{conversation_id}": {
+    "/chat/api/v1/conversations/{conversation_id}": {
       "get": {
-        "operationId": "chat_api_conversations_retrieve",
+        "operationId": "chat_api_v1_conversations_retrieve",
         "description": "Retrieve a single conversation (participant-only).\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
@@ -146,9 +146,9 @@
         }
       }
     },
-    "/chat/api/conversations/{conversation_id}/messages": {
+    "/chat/api/v1/conversations/{conversation_id}/messages": {
       "get": {
-        "operationId": "chat_api_conversations_messages_list",
+        "operationId": "chat_api_v1_conversations_messages_list",
         "description": "History (anchor by seq, both directions) or send a message.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
@@ -216,7 +216,7 @@
         }
       },
       "post": {
-        "operationId": "chat_api_conversations_messages_create",
+        "operationId": "chat_api_v1_conversations_messages_create",
         "description": "History (anchor by seq, both directions) or send a message.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
@@ -270,9 +270,9 @@
         }
       }
     },
-    "/chat/api/conversations/{conversation_id}/read": {
+    "/chat/api/v1/conversations/{conversation_id}/read": {
       "post": {
-        "operationId": "chat_api_conversations_read_create",
+        "operationId": "chat_api_v1_conversations_read_create",
         "description": "Advance the requesting user's read marker in a conversation.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
@@ -320,9 +320,9 @@
         }
       }
     },
-    "/chat/api/support/conversations/{conversation_id}/assign": {
+    "/chat/api/v1/support/conversations/{conversation_id}/assign": {
       "post": {
-        "operationId": "chat_api_support_conversations_assign_create",
+        "operationId": "chat_api_v1_support_conversations_assign_create",
         "description": "Assign the requesting user (as operator) to a support conversation.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
@@ -357,9 +357,9 @@
         }
       }
     },
-    "/chat/api/support/conversations/{conversation_id}/reopen": {
+    "/chat/api/v1/support/conversations/{conversation_id}/reopen": {
       "post": {
-        "operationId": "chat_api_support_conversations_reopen_create",
+        "operationId": "chat_api_v1_support_conversations_reopen_create",
         "description": "Reopen a resolved support conversation.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
@@ -394,9 +394,9 @@
         }
       }
     },
-    "/chat/api/support/conversations/{conversation_id}/resolve": {
+    "/chat/api/v1/support/conversations/{conversation_id}/resolve": {
       "post": {
-        "operationId": "chat_api_support_conversations_resolve_create",
+        "operationId": "chat_api_v1_support_conversations_resolve_create",
         "description": "Mark a support conversation resolved.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
@@ -431,9 +431,9 @@
         }
       }
     },
-    "/chat/api/support/queue": {
+    "/chat/api/v1/support/queue": {
       "get": {
-        "operationId": "chat_api_support_queue_list",
+        "operationId": "chat_api_v1_support_queue_list",
         "description": "The queue of unassigned, still-active support conversations.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
