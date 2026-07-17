@@ -4,6 +4,12 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-07-17
+
+Fix-up: 0.1.4's CI/publish failed on contract drift — `docs/capabilities.json`
+embeds the package version and wasn't regenerated for the 0.1.4 bump.
+Regenerated via `make contract`; no other diff.
+
 ## [0.1.4] - 2026-07-17
 
 Fleet follow-up to stapel-core 0.12.0 (legacy shim sweep). No source
