@@ -7,5 +7,3 @@ history and conversation lists, and a support layer (queue → assign → resolv
 reopen) built on the same model. Realtime delivery is an optional Channels
 consumer; correctness never depends on it (clients replay by ``seq``).
 """
-
-default_app_config = "stapel_chat.apps.ChatConfig"

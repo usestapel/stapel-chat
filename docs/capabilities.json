@@ -1,6 +1,6 @@
 {
   "module": "stapel-chat",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "provides": "Conversations and messaging: direct (1:1, idempotent by participant pair), group and support threads on one model; text/system messages with a monotonic per-conversation seq, replies and opaque CDN attachment keys; per-participant read markers and unread counts; anchor-paginated history (canonical anchor=seq) and conversation lists; a support layer (unassigned queue, first-come assignment, open/pending/resolved with reopen); and an optional Channels consumer for realtime delivery with seq-replay resume.",
   "axes": [
     {
