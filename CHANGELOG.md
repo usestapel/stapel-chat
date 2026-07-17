@@ -4,6 +4,13 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-07-17
+
+Fix-up #2: 0.1.5's regen still baked the old version into
+`docs/capabilities.json` (`make contract` ran before the version bump
+landed). Re-ran with 0.1.6 already in `pyproject.toml`; verified match,
+suite green.
+
 ## [0.1.5] - 2026-07-17
 
 Fix-up: 0.1.4's CI/publish failed on contract drift — `docs/capabilities.json`
