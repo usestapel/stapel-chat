@@ -6,6 +6,7 @@
 [![downloads](https://static.pepy.tech/badge/stapel-chat/month)](https://pepy.tech/project/stapel-chat)
 [![python](https://img.shields.io/pypi/pyversions/stapel-chat?logo=python&logoColor=white)](https://pypi.org/project/stapel-chat/)
 [![license](https://img.shields.io/github/license/usestapel/stapel-chat)](https://github.com/usestapel/stapel-chat/blob/main/LICENSE)
+[![llms.txt](https://img.shields.io/badge/llms.txt-blue)](https://github.com/usestapel/stapel-chat/blob/main/docs/llms.txt)
 
 Conversations, messaging and support chat for the [Stapel](https://github.com/usestapel)
 framework — a reusable Django app you mount in a host project.

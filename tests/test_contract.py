@@ -38,7 +38,9 @@ if _PY != (3, 12):
 REPO = Path(__file__).resolve().parent.parent
 DOCS = REPO / "docs"
 TRIAD = ("schema.json", "flows.json", "errors.json")
-ARTIFACTS = TRIAD + ("capabilities.json",)
+# The fifth artifact: docs/llms.txt (badge-canon §3, stapel_tools.llms_txt) —
+# an agent-sized slice of capabilities.json (+ this triad), same discipline.
+ARTIFACTS = TRIAD + ("capabilities.json", "llms.txt")
 
 
 def _emit(out_dir: Path) -> None:
@@ -49,6 +51,12 @@ def _emit(out_dir: Path) -> None:
             check=True,
             capture_output=True,
         )
+    subprocess.run(
+        [sys.executable, "-m", "stapel_tools.llms_txt", ".", "--out", str(out_dir)],
+        cwd=str(REPO),
+        check=True,
+        capture_output=True,
+    )
 
 
 def test_contract_artifacts_committed():

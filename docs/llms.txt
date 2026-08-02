@@ -1,0 +1,101 @@
+# stapel-chat 0.1.7
+
+Conversations and messaging: direct (1:1, idempotent by participant pair), group and support threads on one model; text/system messages with a monotonic per-conversation seq, replies and opaque CDN attachment keys; per-participant read markers and unread counts; anchor-paginated history (canonical anchor=seq) and conversation lists; a support layer (unassigned queue, first-come assignment, open/pending/resolved with reopen); and an optional Channels consumer for realtime delivery with seq-replay resume.
+
+Contract: axes 3 · extension points 4 · operations 10 · error codes 53.
+Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
+
+## Configuration axes — what a product switches on
+Settings keys; `default` is what you get by saying nothing. Turning an axis off unmounts the operations it gates.
+- ATTACHMENTS [bool, default true] — Allow message attachments
+  When on, a message may carry a list of opaque attachment keys (the files live in the host's CDN/storage; the module stores only the keys). When off, any message with an attachment is rejected. Text is always allowed.
+- CHAT_KINDS [list, default ["direct", "group", "support"]] — Which conversation types are offered
+  The enabled subset of direct (1:1), group and support threads. Drop "support" to run a pure peer-to-peer chat with no operator queue or assignment; drop "group" to allow only 1:1 direct threads. Creating (or, for support, operating on) a kind that is not enabled is refused. Values: any non-empty subset of direct, group, support.
+- MAX_BODY_LENGTH [enum, default 4000] — Maximum message length
+  Hard cap, in characters, on a single text message body. A longer body is rejected before it is stored. Raise it for long-form support replies, lower it for terse chat.
+
+## Extension points — what a product replaces, fork-free
+- SCOPE_PROVIDER [dotted_path]
+  Swap how the opaque scope_key (workspace/org/tenant) is resolved from the request and enforced on querysets — the default is a single global scope; a host may return the active workspace_id so conversations are partitioned per tenant.
+- chat.message [comm_event]
+  Emitted (transactionally, via the outbox) whenever a message is appended. Realtime delivery, search indexing and notifications subscribe without any coupling in the engine.
+- chat.support.assigned [comm_event]
+  Emitted when a support conversation is claimed by an operator — routing and operator-notification layers subscribe.
+- serializer_seams [class_override]
+  Every view declares request/response serializer seams (SerializerSeamMixin) — subclass the view, override the attribute, remount the URL.
+
+## Fits with — fleet dependencies
+- stapel-auth (optional) — every endpoint requires an authenticated user (IsAuthenticated); stapel-auth is the shelf's session issuer — any stapel-core-compatible JWT issuer satisfies the check
+- stapel-cdn (optional) — messages carry opaque attachment keys only; a file/CDN module (or any host storage) owns the bytes those keys point at
+- stapel-core (required) — comm bus (chat.message / chat.support.assigned emits via the outbox), JWT authentication (HTTP + optional Channels), AppSettings config layer, anchor pagination
+
+## HTTP operations (10) — call by operationId, never by a typed path
+Paths are relative to `/chat/api/v1/`.
+### Chat
+- POST /conversations — chat_api_v1_conversations_create
+- GET /conversations — chat_api_v1_conversations_list
+- POST /conversations/{conversation_id}/messages — chat_api_v1_conversations_messages_create
+- GET /conversations/{conversation_id}/messages — chat_api_v1_conversations_messages_list
+- POST /conversations/{conversation_id}/read — chat_api_v1_conversations_read_create
+- GET /conversations/{conversation_id} — chat_api_v1_conversations_retrieve
+### Chat support
+- POST /support/conversations/{conversation_id}/assign — chat_api_v1_support_conversations_assign_create
+- POST /support/conversations/{conversation_id}/reopen — chat_api_v1_support_conversations_reopen_create
+- POST /support/conversations/{conversation_id}/resolve — chat_api_v1_support_conversations_resolve_create
+- GET /support/queue — chat_api_v1_support_queue_list
+
+## Error codes (53) — the StapelError envelope
+Render `t(code, params)`; branch UX on the remediation. Localized text lives in docs/errors.<lang>.md, not here.
+- error.400.bad_request [400] fix_input
+- error.400.captcha_invalid [400] retry
+- error.400.captcha_required [400] retry
+- error.400.chat_attachments_disabled [400] fix_input
+- error.400.chat_body_too_long [400] fix_input
+- error.400.chat_empty_message [400] fix_input
+- error.400.chat_invalid_direct [400] fix_input
+- error.400.chat_invalid_kind [400] fix_input
+- error.400.chat_invalid_reply [400] fix_input
+- error.400.chat_kind_disabled [400] fix_input
+- error.400.chat_not_support [400] fix_input
+- error.400.expected_list [400] fix_input
+- error.400.field.blank [400] fix_input {field}
+- error.400.field.does_not_exist [400] fix_input {field}
+- error.400.field.invalid [400] fix_input {field}
+- error.400.field.invalid_choice [400] fix_input {field}
+- error.400.field.max_length [400] fix_input {field,max_length}
+- error.400.field.max_value [400] fix_input {field,max_value}
+- error.400.field.min_length [400] fix_input {field,min_length}
+- error.400.field.min_value [400] fix_input {field,min_value}
+- error.400.field.null [400] fix_input {field}
+- error.400.field.required [400] fix_input {field}
+- error.400.field.unique [400] fix_input {field}
+- error.400.invalid_ad_id [400] fix_input
+- error.400.validation_error [400] fix_input
+- error.400.verification_failed [400] verify
+- error.400.verification_invalid_factor [400] verify
+- error.401.unauthorized [401] reauthenticate
+- error.402.payment_required [402] retry
+- error.403.chat_not_operator [403] retry
+- error.403.chat_not_participant [403] retry
+- error.403.forbidden [403] retry
+- error.403.network_blocked [403] contact_support
+- error.403.verification_enrollment_required [403] verify
+- error.403.verification_required [403] verify
+- error.404.ad_not_found [404] retry
+- error.404.chat_conversation_not_found [404] retry
+- error.404.not_found [404] retry
+- error.404.verification_challenge_not_found [404] verify
+- error.405.method_not_allowed [405] retry
+- error.406.not_acceptable [406] retry
+- error.408.request_timeout [408] retry
+- error.409.chat_already_assigned [409] fix_input
+- error.409.conflict [409] fix_input
+- error.410.gone [410] retry
+- error.413.payload_too_large [413] retry
+- error.415.unsupported_media_type [415] retry
+- error.422.unprocessable_entity [422] wait_and_retry
+- error.423.locked [423] wait_and_retry
+- error.423.verification_locked [423] wait_and_retry
+- error.429.rate_limit [429] wait_and_retry {retry_after_minutes}
+- error.429.too_many_requests [429] wait_and_retry
+- error.500.internal [500] contact_support
