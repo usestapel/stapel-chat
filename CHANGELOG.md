@@ -4,6 +4,21 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-08-02
+
+### Added
+- `docs/llms.txt` — the fifth contract artifact, an agent-sized slice of the
+  schema/flows/errors/capabilities triad, wired into `make contract` /
+  `make contract-check` (badge-canon §3).
+- Badge canon in README, Python 3.14 classifier.
+- CI matrix now tests Python 3.14 (the version actually in production),
+  alongside the existing 3.11-3.13.
+
+### Fixed
+- `docs/capabilities.json`, `docs/flows.json`, `docs/errors.json`,
+  `docs/llms.txt` and `CONFIG.MD` now ship in the wheel via `package-data`
+  (#184); previously repo-only, invisible to `--from-installed` tooling.
+
 ## [0.1.6] - 2026-07-17
 
 Fix-up #2: 0.1.5's regen still baked the old version into
