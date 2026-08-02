@@ -1,5 +1,12 @@
 # stapel-chat
 
+[![CI](https://img.shields.io/github/actions/workflow/status/usestapel/stapel-chat/ci.yml?branch=main&logo=github&label=CI)](https://github.com/usestapel/stapel-chat/actions/workflows/ci.yml?query=branch%3Amain)
+[![coverage](https://img.shields.io/codecov/c/github/usestapel/stapel-chat?branch=main&logo=codecov&label=coverage)](https://app.codecov.io/gh/usestapel/stapel-chat)
+[![pypi](https://img.shields.io/pypi/v/stapel-chat?logo=pypi&logoColor=white&label=pypi)](https://pypi.org/project/stapel-chat/)
+[![downloads](https://static.pepy.tech/badge/stapel-chat/month)](https://pepy.tech/project/stapel-chat)
+[![python](https://img.shields.io/pypi/pyversions/stapel-chat?logo=python&logoColor=white)](https://pypi.org/project/stapel-chat/)
+[![license](https://img.shields.io/github/license/usestapel/stapel-chat)](https://github.com/usestapel/stapel-chat/blob/main/LICENSE)
+
 Conversations, messaging and support chat for the [Stapel](https://github.com/usestapel)
 framework — a reusable Django app you mount in a host project.
 
