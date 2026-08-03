@@ -75,6 +75,92 @@
       "summary": "Every view declares request/response serializer seams (SerializerSeamMixin) — subclass the view, override the attribute, remount the URL."
     }
   ],
+  "surface": [
+    {
+      "name": "assign_operator",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.assign_operator",
+      "intent": "First-come claim of a support thread: re-reads the conversation under select_for_update, refuses a second operator with AlreadyAssigned, stays idempotent for the same one, adds the operator participant, emits chat.support.assigned and posts the system line. Two operators pressing \"take\" in the same second is the race this exists for — setting assigned_operator directly loses it and silently steals the thread."
+    },
+    {
+      "name": "create_direct",
+      "kind": "factory",
+      "path": "stapel_chat.services.create_direct",
+      "intent": "Get-or-create the 1:1 thread between two users — idempotent by an order-independent direct_key over (scope_key, both ids), with the create race decided by the partial unique constraint (the loser returns the winner's row). Reach for this instead of your own get_or_create over a participant pair: a hand-rolled one has nothing unique to key on and quietly hands the two users two different threads.",
+      "instead_of": [
+        "stapel_chat.models.Conversation.objects.get_or_create"
+      ]
+    },
+    {
+      "name": "create_group",
+      "kind": "factory",
+      "path": "stapel_chat.services.create_group",
+      "intent": "Create a group thread and seed its participant rows in the same call (owner first, ids deduped, conflicts ignored). Group threads are deliberately never deduplicated — each call is a new conversation. A Conversation row created by hand has no participants, and the list endpoint filters on participants__user, so nobody can see it.",
+      "instead_of": [
+        "stapel_chat.models.Conversation.objects.create"
+      ]
+    },
+    {
+      "name": "create_support",
+      "kind": "factory",
+      "path": "stapel_chat.services.create_support",
+      "intent": "Open a support thread for a customer — unassigned, support_status=open, customer seeded as the participant, which is exactly the shape support_queue() selects on. Call it from an order/ticket flow instead of writing the row: a support conversation with a blank status or no participant is one no operator will ever be shown.",
+      "instead_of": [
+        "stapel_chat.models.Conversation.objects.create"
+      ]
+    },
+    {
+      "name": "mark_read",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.mark_read",
+      "intent": "Advance a participant's read marker to upto_seq and never backwards — the update is filtered on last_read_seq__lt, and the return value says whether it actually moved. Assigning last_read_seq yourself lets an out-of-order client rewind the marker and resurrect already-read messages as unread.",
+      "instead_of": [
+        "stapel_chat.models.ConversationParticipant.objects.update"
+      ]
+    },
+    {
+      "name": "post_message",
+      "kind": "factory",
+      "path": "stapel_chat.services.post_message",
+      "intent": "THE send path, and the only sanctioned way a message comes into being: allocates the next per-conversation seq under a select_for_update row lock, persists the row and writes the chat.message outbox event in ONE transaction (mutate_and_emit), schedules best-effort realtime fan-out on_commit, retries on a seq collision. Inserting a Message with a seq you chose yourself bypasses the counter, breaks the gapless total order that anchor-paginated history and realtime resume both anchor on, and emits nothing at all.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.create"
+      ]
+    },
+    {
+      "name": "reopen_support",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.reopen_support",
+      "intent": "Reopen a resolved thread back to open with the chat.support.reopened system line. Note it re-enters support_queue() only while no operator is assigned — a reopened thread stays with its previous operator by design."
+    },
+    {
+      "name": "resolve_support",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.resolve_support",
+      "intent": "Close a support thread — status=resolved plus the chat.support.resolved system line. Call the wrapper so \"resolved\" reads the same way in every deployment's transcript and no thread is closed without a marker in its history."
+    },
+    {
+      "name": "set_support_status",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.set_support_status",
+      "intent": "Move a support thread between open/pending/resolved and optionally post the system line marking the transition; refuses a direct/group conversation with NotSupport. This is the one to call for pending, which has no dedicated wrapper."
+    },
+    {
+      "name": "support_queue",
+      "kind": "factory",
+      "path": "stapel_chat.services.support_queue",
+      "intent": "The operator queue as a queryset: unassigned support conversations still open or pending, oldest first. Pass qs= to pre-scope it (typically the SCOPE_PROVIDER filter) rather than re-deriving the filter — \"what is still waiting for an operator\" is policy, and a second copy of it drifts from the one assign_operator enforces."
+    },
+    {
+      "name": "unread_count",
+      "kind": "factory",
+      "path": "stapel_chat.services.unread_count",
+      "intent": "Messages past a participant's marker that somebody else authored — system lines (null sender) and the participant's own messages are excluded, and that exclusion is the whole difference from a naive count: a hand-rolled seq__gt count lights the badge for your own message and for every \"operator assigned\" system line.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.count"
+      ]
+    }
+  ],
   "operations_total": 10,
   "requires": [
     {

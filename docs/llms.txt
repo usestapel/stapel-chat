@@ -2,7 +2,7 @@
 
 Conversations and messaging: direct (1:1, idempotent by participant pair), group and support threads on one model; text/system messages with a monotonic per-conversation seq, replies and opaque CDN attachment keys; per-participant read markers and unread counts; anchor-paginated history (canonical anchor=seq) and conversation lists; a support layer (unassigned queue, first-come assignment, open/pending/resolved with reopen); and an optional Channels consumer for realtime delivery with seq-replay resume.
 
-Contract: axes 3 · extension points 4 · operations 10 · error codes 53.
+Contract: axes 3 · surface 11 · extension points 4 · operations 10 · error codes 53.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -13,6 +13,39 @@ Settings keys; `default` is what you get by saying nothing. Turning an axis off 
   The enabled subset of direct (1:1), group and support threads. Drop "support" to run a pure peer-to-peer chat with no operator queue or assignment; drop "group" to allow only 1:1 direct threads. Creating (or, for support, operating on) a kind that is not enabled is refused. Values: any non-empty subset of direct, group, support.
 - MAX_BODY_LENGTH [enum, default 4000] — Maximum message length
   Hard cap, in characters, on a single text message body. A longer body is rejected before it is stored. Raise it for long-form support replies, lower it for terse chat.
+
+## Usage surface — call these before writing your own
+This is the answer to "does Stapel already have something for X?". `instead of` names the outside symbol this one displaces.
+### gate_function
+- assign_operator — stapel_chat.services.assign_operator
+  First-come claim of a support thread: re-reads the conversation under select_for_update, refuses a second operator with AlreadyAssigned, stays idempotent for the same one, adds the operator participant, emits chat.support.assigned and posts the system line. Two operators pressing "take" in the same second is the race this exists for — setting assigned_operator directly loses it and silently steals the thread.
+- mark_read — stapel_chat.services.mark_read
+  instead of: stapel_chat.models.ConversationParticipant.objects.update
+  Advance a participant's read marker to upto_seq and never backwards — the update is filtered on last_read_seq__lt, and the return value says whether it actually moved. Assigning last_read_seq yourself lets an out-of-order client rewind the marker and resurrect already-read messages as unread.
+- reopen_support — stapel_chat.services.reopen_support
+  Reopen a resolved thread back to open with the chat.support.reopened system line. Note it re-enters support_queue() only while no operator is assigned — a reopened thread stays with its previous operator by design.
+- resolve_support — stapel_chat.services.resolve_support
+  Close a support thread — status=resolved plus the chat.support.resolved system line. Call the wrapper so "resolved" reads the same way in every deployment's transcript and no thread is closed without a marker in its history.
+- set_support_status — stapel_chat.services.set_support_status
+  Move a support thread between open/pending/resolved and optionally post the system line marking the transition; refuses a direct/group conversation with NotSupport. This is the one to call for pending, which has no dedicated wrapper.
+### factory
+- create_direct — stapel_chat.services.create_direct
+  instead of: stapel_chat.models.Conversation.objects.get_or_create
+  Get-or-create the 1:1 thread between two users — idempotent by an order-independent direct_key over (scope_key, both ids), with the create race decided by the partial unique constraint (the loser returns the winner's row). Reach for this instead of your own get_or_create over a participant pair: a hand-rolled one has nothing unique to key on and quietly hands the two users two different threads.
+- create_group — stapel_chat.services.create_group
+  instead of: stapel_chat.models.Conversation.objects.create
+  Create a group thread and seed its participant rows in the same call (owner first, ids deduped, conflicts ignored). Group threads are deliberately never deduplicated — each call is a new conversation. A Conversation row created by hand has no participants, and the list endpoint filters on participants__user, so nobody can see it.
+- create_support — stapel_chat.services.create_support
+  instead of: stapel_chat.models.Conversation.objects.create
+  Open a support thread for a customer — unassigned, support_status=open, customer seeded as the participant, which is exactly the shape support_queue() selects on. Call it from an order/ticket flow instead of writing the row: a support conversation with a blank status or no participant is one no operator will ever be shown.
+- post_message — stapel_chat.services.post_message
+  instead of: stapel_chat.models.Message.objects.create
+  THE send path, and the only sanctioned way a message comes into being: allocates the next per-conversation seq under a select_for_update row lock, persists the row and writes the chat.message outbox event in ONE transaction (mutate_and_emit), schedules best-effort realtime fan-out on_commit, retries on a seq collision. Inserting a Message with a seq you chose yourself bypasses the counter, breaks the gapless total order that anchor-paginated history and realtime resume both anchor on, and emits nothing at all.
+- support_queue — stapel_chat.services.support_queue
+  The operator queue as a queryset: unassigned support conversations still open or pending, oldest first. Pass qs= to pre-scope it (typically the SCOPE_PROVIDER filter) rather than re-deriving the filter — "what is still waiting for an operator" is policy, and a second copy of it drifts from the one assign_operator enforces.
+- unread_count — stapel_chat.services.unread_count
+  instead of: stapel_chat.models.Message.objects.count
+  Messages past a participant's marker that somebody else authored — system lines (null sender) and the participant's own messages are excluded, and that exclusion is the whole difference from a naive count: a hand-rolled seq__gt count lights the badge for your own message and for every "operator assigned" system line.
 
 ## Extension points — what a product replaces, fork-free
 - SCOPE_PROVIDER [dotted_path]
