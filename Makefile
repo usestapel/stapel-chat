@@ -15,12 +15,19 @@ PYTHON ?= python3
 # artifact docs/llms.txt (badge-canon §3, stapel_tools.llms_txt) — an
 # agent-sized slice of capabilities.json (+ schema/errors/flows), rendered
 # last so it always reflects this same run's triad + capabilities.json.
+#
+# Then README.md (stapel_tools.readme), assembled from docs/readme.md — the
+# human half, the only file a person edits — plus everything emitted above.
+# Badges, version, surface counts and doc links are generated, so a release
+# cannot leave them behind. Edit docs/readme.md; never README.md.
 contract:
 	$(PYTHON) -m stapel_chat._codegen --out docs
 	$(PYTHON) -m stapel_chat._capabilities --out docs
 	$(PYTHON) -m stapel_tools.llms_txt . --out docs
+	$(PYTHON) -m stapel_tools.readme .
 
-# Drift gate: regenerate into a temp dir and diff against the committed docs/*.
+# Drift gate: regenerate into a temp dir and diff against the committed docs/*
+# (mirrors the monolith's `make codegen-check` and the frontend's `gen:*:check`).
 contract-check:
 	@tmp=$$(mktemp -d); \
 	$(PYTHON) -m stapel_chat._codegen --out "$$tmp" || { rm -rf "$$tmp"; exit 1; }; \
@@ -34,7 +41,8 @@ contract-check:
 		fi; \
 	done; \
 	rm -rf "$$tmp"; \
-	if [ $$rc -eq 0 ]; then echo "contract-check: docs/{schema,flows,errors,capabilities,llms.txt} up to date"; fi; \
+	$(PYTHON) -m stapel_tools.readme . --check || rc=1; \
+	if [ $$rc -eq 0 ]; then echo "contract-check: docs/{schema,flows,errors,capabilities,llms.txt} + README.md up to date"; fi; \
 	exit $$rc
 
 
