@@ -4,6 +4,16 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-08-15
+
+### Changed — `stapel-core` floor raised to 0.26.0
+
+`docs/errors.json` carries an `owner` per entry, and only stapel-core 0.26.0
+emits it. The floor lagged behind, so a consumer resolving an older core
+regenerated an artifact without `owner` and the drift gate went red — the
+field was declared but never required. The floor now matches the artifact
+that is committed.
+
 ## [0.1.8] - 2026-08-02
 
 ### Added
