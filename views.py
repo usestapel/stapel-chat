@@ -168,6 +168,17 @@ def _support_enabled() -> bool:
     return ConversationKind.SUPPORT in chat_settings.CHAT_KINDS
 
 
+def _may_operate(request, conv=None) -> bool:
+    """Operator authority, asked BEFORE the participant table is consulted.
+
+    Every other support check reads ``ConversationParticipant`` — and assign
+    writes that row, so a caller who reached assign had already answered its
+    own question. This asks the seam instead. A provider that cannot find out
+    raises (503); it never returns True on a failed lookup.
+    """
+    return get_scope_provider().can_operate(request, conv)
+
+
 # ── Conversation views ─────────────────────────────────────────────────────
 
 
@@ -366,6 +377,10 @@ class SupportQueueView(SerializerSeamMixin, APIView):
     def get(self, request):  # noqa: R007
         if not _support_enabled():
             return StapelErrorResponse(400, ERR_400_KIND_DISABLED)
+        # The rows carry scope_key and every participant's user_id: the queue
+        # is an operator surface, not a listing.
+        if not _may_operate(request):
+            return StapelErrorResponse(403, ERR_403_NOT_OPERATOR)
         qs = services.support_queue(qs=_scoped(request)).prefetch_related(
             "participants"
         )
@@ -395,6 +410,10 @@ class SupportAssignView(SerializerSeamMixin, APIView):
         conv = _get_conversation(request, conversation_id)
         if conv is None or conv.kind != ConversationKind.SUPPORT:
             return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
+        # Before the write, not after: assigning MINTS the operator-role
+        # participant row that every later check on this thread trusts.
+        if not _may_operate(request, conv):
+            return StapelErrorResponse(403, ERR_403_NOT_OPERATOR)
         try:
             conv = services.assign_operator(conversation=conv, operator=request.user)
         except services.AlreadyAssigned:
@@ -430,6 +449,10 @@ class _SupportTransitionView(SerializerSeamMixin, APIView):
             return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
         participant = _my_participant(conv, request.user)
         if participant is None or participant.role != ParticipantRole.OPERATOR:
+            return StapelErrorResponse(403, ERR_403_NOT_OPERATOR)
+        # The participant row above is necessary, never sufficient: it is
+        # writable by the very endpoint this pair follows.
+        if not _may_operate(request, conv):
             return StapelErrorResponse(403, ERR_403_NOT_OPERATOR)
         conv = self._transition(conv)
         conv = (

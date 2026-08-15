@@ -55,10 +55,22 @@ layers subscribe. Schema: `schemas/emits/chat.support.assigned.json`.
 
 ### 3. scope_key provider — `SCOPE_PROVIDER` (dotted path, replace)
 
-A `ScopeProvider` (`resolve(request) -> scope_key`, `filter(qs, request)`)
-resolves the opaque scope from the request and filters querysets. Default is a
-no-op single global scope; a host may return the active `workspace_id` to
-partition conversations per tenant.
+A `ScopeProvider` (`resolve(request) -> scope_key`, `filter(qs, request)`,
+`can_operate(request, conversation=None) -> bool`) resolves the opaque scope
+from the request, filters querysets, and answers whether the caller may act as
+a support **operator** — read the queue, claim a thread, resolve/reopen it.
+
+The shipped `DefaultScopeProvider` is a single global scope for
+resolve/filter, but `can_operate` is not a no-op: it answers with the third
+principal state (`stapel_core.django.scope`), so a registered account holding
+no mandate in any workspace is not an operator. The customer half is
+deliberately untouched — a person opening a support ticket typically holds no
+mandate at all. A lookup that cannot be answered raises 503, never a 403.
+
+Guarded by system checks `E001`/`E002` (importable, correctly typed) and
+`E005`/`W001` — running the shipped single-scope provider is an ERROR where
+this deployment has workspaces, a warning where it is genuinely standalone. A
+host returns the active `workspace_id` and checks a real operator capability.
 
 ### Serializer seams (`views.py`)
 

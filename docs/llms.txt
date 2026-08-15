@@ -2,7 +2,7 @@
 
 Conversations and messaging: direct (1:1, idempotent by participant pair), group and support threads on one model; text/system messages with a monotonic per-conversation seq, replies and opaque CDN attachment keys; per-participant read markers and unread counts; anchor-paginated history (canonical anchor=seq) and conversation lists; a support layer (unassigned queue, first-come assignment, open/pending/resolved with reopen); and an optional Channels consumer for realtime delivery with seq-replay resume.
 
-Contract: axes 3 · surface 11 · extension points 4 · operations 10 · error codes 53.
+Contract: axes 3 · surface 11 · extension points 4 · operations 10 · error codes 54.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -77,7 +77,7 @@ Paths are relative to `/chat/api/v1/`.
 - POST /support/conversations/{conversation_id}/resolve — chat_api_v1_support_conversations_resolve_create
 - GET /support/queue — chat_api_v1_support_queue_list
 
-## Error codes (53) — the StapelError envelope
+## Error codes (54) — the StapelError envelope
 Render `t(code, params)`; branch UX on the remediation. Localized text lives in docs/errors.<lang>.md, not here.
 - error.400.bad_request [400] fix_input
 - error.400.captcha_invalid [400] retry
@@ -132,3 +132,4 @@ Render `t(code, params)`; branch UX on the remediation. Localized text lives in 
 - error.429.rate_limit [429] wait_and_retry {retry_after_minutes}
 - error.429.too_many_requests [429] wait_and_retry
 - error.500.internal [500] contact_support
+- error.503.mandate_unavailable [503] retry

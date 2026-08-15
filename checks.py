@@ -5,12 +5,17 @@ cannot run with; W-level for entries that only degrade lazily.
 
 - SCOPE_PROVIDER unimportable / not a ScopeProvider -> E (create & list cannot
   resolve/filter scope).
+- SCOPE_PROVIDER still the shipped single-scope default while this deployment
+  has workspaces -> E; standalone -> W. Importability and type were the only
+  things ever validated here, so nothing said a multi-tenant host was running
+  the default that puts every tenant in one scope.
 - CHAT_KINDS not a subset of {direct, group, support} -> E (an unknown kind
   would be un-creatable and confuse the capability report).
 - MAX_BODY_LENGTH not a positive int -> E (would reject or admit bodies
   nonsensically).
 """
 from django.core import checks
+from stapel_core.django.scope import check_shipped_scope_provider
 
 _VALID_KINDS = {"direct", "group", "support"}
 
@@ -18,7 +23,7 @@ _VALID_KINDS = {"direct", "group", "support"}
 @checks.register(checks.Tags.compatibility)
 def check_scope_provider(app_configs, **kwargs):
     from .conf import chat_settings
-    from .scope import ScopeProvider
+    from .scope import DefaultScopeProvider, ScopeProvider
 
     try:
         provider = chat_settings.SCOPE_PROVIDER
@@ -37,7 +42,16 @@ def check_scope_provider(app_configs, **kwargs):
                 id="stapel_chat.E002",
             )
         ]
-    return []
+    # Importable and correctly typed says nothing about whether the shipped
+    # single-scope default is still carrying a multi-tenant deployment.
+    return check_shipped_scope_provider(
+        setting="STAPEL_CHAT['SCOPE_PROVIDER']",
+        provider=provider,
+        shipped_cls=DefaultScopeProvider,
+        error_id="stapel_chat.E005",
+        warning_id="stapel_chat.W001",
+        isolates="conversation",
+    )
 
 
 @checks.register(checks.Tags.compatibility)
