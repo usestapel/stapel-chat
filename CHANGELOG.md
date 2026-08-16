@@ -4,6 +4,42 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-16
+
+### Security — ask who may operate before the participant row answers
+
+`SupportAssignView` was first-come-served behind `IsAuthenticated`. Assigning
+writes a `ConversationParticipant` with `role=OPERATOR`, and every later check
+on the thread asked the participant table — which then answered with the row
+the caller had just minted. One POST and a stranger's support conversation was
+readable, postable and resolvable by an account holding no mandate anywhere.
+
+- `ScopeProvider.can_operate(request, conversation=None)` — the question that
+  comes *before* the participant row. The support queue, the claim, and
+  resolve/reopen all ask it first. False means no; `MandateUnavailable` (503)
+  means "could not find out" — admitting on a failed lookup is how the seam was
+  open to begin with. Deliberately not applied to the customer half: a person
+  opening a ticket typically holds no mandate, and refusing them would close
+  the product to fix the door.
+- `DefaultScopeProvider` answers it from the third principal state
+  (`stapel_core.django.scope`), so a registered account with no mandate is not
+  an operator of anything; in a genuinely standalone deployment it stays
+  permissive and `checks.py` says so out loud.
+- New system checks: `stapel_chat.E005` / `W001` — the shipped single-scope
+  default carrying a multi-tenant host is now an error, not a silence.
+  Importability and type were the only things ever validated here.
+
+**Breaking for custom providers**: `can_operate` is abstract on `ScopeProvider`.
+A host that subclasses it directly must implement the method (or mix in
+`stapel_core.django.scope.MandateScopeMixin`), which is why this is 0.2.0 and
+not a patch.
+
+### Changed — `stapel-core` floor raised to 0.27.0
+
+`django/scope.py` — `MandateScopeMixin` and `check_shipped_scope_provider` —
+exists only in 0.27.0, and core owns `error.503.mandate_unavailable` in the
+committed `docs/errors.json`.
+
 ## [0.1.9] - 2026-08-15
 
 ### Changed — `stapel-core` floor raised to 0.26.0
