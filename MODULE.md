@@ -33,7 +33,8 @@
   `assign_operator` (adds the operator participant, emits
   `chat.support.assigned`, posts a system line), and `open` / `pending` /
   `resolved` with `reopen` — all on the same model (`kind=support`).
-- **Realtime (optional)** — `stapel_chat.consumers.ChatConsumer` over
+- **Realtime (optional)** — `stapel_chat.consumers.ChatConsumer`, mounted via
+  `stapel_chat.routing.websocket_urlpatterns`, over
   `stapel_core.django.jwt.channels`. Store-first, transport-thin: the socket
   never owns state; it relays the durable, `seq`-ordered journal. `hello{last_seq}`
   replays `Message.seq > last_seq` then goes live; frames are seq-deduped;
@@ -115,6 +116,37 @@ views), they never unmount an endpoint.
 client → server:  hello{last_seq} / send{body,attachments,reply_to} / ack{seq} / ping
 server → client:  welcome{server_seq} / message{…seq} / replay_done{up_to_seq} / error{code,message} / pong
 ```
+
+### Host ASGI assembly (`routing.py`)
+
+`stapel_chat.routing.websocket_urlpatterns` is the one thing the scaffolder
+cannot generate yet — a host wires it in by hand, once, in its own `asgi.py`.
+Mount point: `ws/chat/<uuid:conversation_id>` (the consumer reads
+`url_route.kwargs["conversation_id"]`). Auth is the host's job, not this
+module's: `ChatConsumer.connect()` reads `scope["user"]` and closes `4401`
+if it is unset, so the socket must sit behind core's G14 Channels JWT
+middleware, the same way HTTP sits behind the JWT auth class.
+
+```python
+# asgi.py
+from channels.routing import ProtocolTypeRouter, URLRouter
+from django.core.asgi import get_asgi_application
+from stapel_core.django.jwt.channels import JWTAuthMiddlewareStack
+
+from stapel_chat.routing import websocket_urlpatterns
+
+django_asgi_app = get_asgi_application()
+
+application = ProtocolTypeRouter({
+    "http": django_asgi_app,
+    "websocket": JWTAuthMiddlewareStack(URLRouter(websocket_urlpatterns)),
+})
+```
+
+If the host mounts more than one module's sockets, concatenate their
+`websocket_urlpatterns` lists into one `URLRouter` — each module's paths are
+namespaced by its own `ws/<module>/...` prefix (see `stapel_video.routing`
+for the sibling precedent), so there is no collision.
 
 ## Anti-patterns
 

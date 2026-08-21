@@ -4,6 +4,27 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-22
+
+### Added — `routing.py` (the missing mount for the realtime consumer)
+
+`ChatConsumer` has been resumable and store-first since 0.1.0 (hello →
+welcome → seq replay → live, seq-dedup, `REPLAY_LIMIT`, `error{resync}`), but
+every host had to invent its own mount path — none ever did, so the socket
+shipped and stayed unmounted on every deployment, including the darom fleet.
+
+`stapel_chat.routing.websocket_urlpatterns` mounts it at
+`ws/chat/<uuid:conversation_id>`, mirroring the one existing fleet precedent
+(`stapel_video.routing`). Auth stays the host's job — wire it behind core's
+G14 `stapel_core.django.jwt.channels.JWTAuthMiddlewareStack`, the same as
+every other Channels consumer in the fleet; MODULE.md's new "Host ASGI
+assembly" section has the copy-paste `asgi.py` block, since the scaffolder
+does not generate this wiring yet.
+
+No behavior change to the consumer itself and nothing breaks for a host that
+already hand-rolled its own `routing.py` — this only adds the file that was
+missing.
+
 ## [0.2.1] - 2026-08-21
 
 ### Fixed — `stapel_chat.E005` false positive on every NATS fleet

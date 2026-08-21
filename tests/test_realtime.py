@@ -6,12 +6,36 @@ service layer's ``transaction.on_commit`` fan-out actually fires.
 """
 import pytest
 from channels.db import database_sync_to_async
+from channels.routing import URLRouter
 from channels.testing import WebsocketCommunicator
 
 from stapel_chat import services
 from stapel_chat.consumers import ChatConsumer
+from stapel_chat.routing import websocket_urlpatterns
 
 pytestmark = pytest.mark.asyncio
+
+
+class _InjectUser:
+    """Stand-in for JWTAuthMiddleware (G14): stamps a fixed user on the scope.
+
+    Mirrors stapel_video's routing test harness — the JWT stack itself is
+    stapel-core's own tested surface; this exercises routing.py resolving the
+    real path to ChatConsumer, not a hand-stubbed url_route.
+    """
+
+    def __init__(self, inner, user):
+        self.inner = inner
+        self.user = user
+
+    async def __call__(self, scope, receive, send):
+        scope = dict(scope)
+        scope["user"] = self.user
+        return await self.inner(scope, receive, send)
+
+
+def _routed_app(user):
+    return _InjectUser(URLRouter(websocket_urlpatterns), user)
 
 
 def _make_users():
@@ -132,3 +156,40 @@ async def test_unauthenticated_is_rejected():
     connected, code = await comm.connect()
     assert not connected
     assert code == 4401
+
+
+# ── routing.py: the real URLRouter resolves the mount to ChatConsumer ───────
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_routing_resolves_and_reaches_hello_welcome():
+    """websocket_urlpatterns, not a hand-stubbed url_route, resolves
+    ``ws/chat/<uuid:conversation_id>`` to ChatConsumer and the hello/welcome
+    handshake works end to end through it."""
+    a, b, conv = await database_sync_to_async(_setup_direct)()
+    await database_sync_to_async(_seed)(conv, b, 2)  # seq 1,2
+    comm = WebsocketCommunicator(_routed_app(a), f"/ws/chat/{conv.id}")
+    connected, _ = await comm.connect()
+    assert connected
+    await comm.send_json_to({"type": "hello", "last_seq": 0})
+    welcome = await comm.receive_json_from(timeout=3)
+    assert welcome["type"] == "welcome"
+    assert welcome["conversation_id"] == str(conv.id)
+    assert welcome["server_seq"] == 2
+    assert (await comm.receive_json_from())["seq"] == 1
+    assert (await comm.receive_json_from())["seq"] == 2
+    done = await comm.receive_json_from()
+    assert done["type"] == "replay_done" and done["up_to_seq"] == 2
+    await comm.disconnect()
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_routing_rejects_non_participant():
+    """The routed path enforces the same authz as the direct-consumer test —
+    routing.py changes nothing about who may subscribe."""
+    a, b = await database_sync_to_async(_make_users)()
+    conv = await database_sync_to_async(services.create_group)(owner=b)
+    comm = WebsocketCommunicator(_routed_app(a), f"/ws/chat/{conv.id}")
+    connected, code = await comm.connect()
+    assert not connected
+    assert code == 4403
