@@ -72,6 +72,13 @@ Guarded by system checks `E001`/`E002` (importable, correctly typed) and
 this deployment has workspaces, a warning where it is genuinely standalone. A
 host returns the active `workspace_id` and checks a real operator capability.
 
+`E005` only fires where that "has workspaces" question is provable at boot
+(`FUNCTION_TRANSPORT` `inprocess`/`http`). Over a bus transport (`nats`, or a
+dotted custom transport) the answer is unknowable at boot by design — `comm.
+function_unreachable_reason`'s own docstring says nothing there can, or
+should, prove a remote provider is up — so the check downgrades to `W002`
+instead of asserting a fact it cannot prove.
+
 ### Serializer seams (`views.py`)
 
 `SerializerSeamMixin` — subclass a view, set `request_serializer_class` /

@@ -4,6 +4,28 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-21
+
+### Fixed — `stapel_chat.E005` false positive on every NATS fleet
+
+`E005` asks whether this deployment has workspaces, by asking whether
+`workspaces.check_mandate` is reachable. Under `FUNCTION_TRANSPORT=nats` (or
+any dotted custom transport), `comm.function_unreachable_reason` returns
+`None` unconditionally — by its own docstring, nothing at boot can, or
+should, prove a bus provider is up. The check read that "not provably
+unreachable" as "workspaces present" and fired `E005` on every such fleet
+running the shipped provider, whether or not workspaces was actually there
+(found on the darom.ai NATS deploy).
+
+`E005` now only fires where the answer is provable at boot — `inprocess`/
+`http` `FUNCTION_TRANSPORT`, where the local registry or the route table
+settles it. Over a bus transport it downgrades to a new `stapel_chat.W002`:
+an honest "cannot verify" advisory rather than a guess dressed up as a
+verdict. A deployment that genuinely has workspaces behind the bus and is
+still running the shipped provider keeps its live tenancy hole either way —
+`W002` says so in its own message — but it is not asserted as a boot-time
+fact this process cannot actually check.
+
 ## [0.2.0] - 2026-08-16
 
 ### Security — ask who may operate before the participant row answers

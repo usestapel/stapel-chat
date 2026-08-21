@@ -36,7 +36,8 @@ def test_the_shipped_provider_warns_in_a_standalone_deployment():
 
 def test_the_shipped_provider_is_an_error_where_workspaces_can_answer():
     """The finding the old check could not make: this deployment knows what a
-    mandate is, and the shipped provider cannot name a tenant."""
+    mandate is, and the shipped provider cannot name a tenant. inprocess is a
+    decidable transport (the registry proves it), so E005 fires here."""
     from stapel_core.comm import function_registry
     from stapel_core.django.mandate import MANDATE_FUNCTION, MANDATE_RESULT_KEY
 
@@ -53,6 +54,54 @@ def test_the_shipped_provider_is_an_error_where_workspaces_can_answer():
 def test_a_real_swap_is_silent(settings):
     settings.STAPEL_CHAT = {"SCOPE_PROVIDER": "tests.test_checks.HostScopeProvider"}
     assert check_scope_provider(None) == []
+
+
+def test_a_real_swap_is_silent_under_nats(settings):
+    """A genuine override is silent regardless of transport: the check never
+    gets far enough to ask about workspaces reachability."""
+    settings.STAPEL_CHAT = {"SCOPE_PROVIDER": "tests.test_checks.HostScopeProvider"}
+    settings.STAPEL_COMM = {"FUNCTION_TRANSPORT": "nats"}
+    assert check_scope_provider(None) == []
+
+
+def test_the_shipped_provider_is_a_warning_under_nats_when_absent(settings):
+    """stapel_chat.E005 regression (darom.ai NATS fleet): under nats,
+    comm.function_unreachable_reason returns None unconditionally — "not
+    provably unreachable" is not "reachable". The check must not read a
+    genuinely standalone nats deployment as having workspaces."""
+    settings.STAPEL_COMM = {"FUNCTION_TRANSPORT": "nats"}
+    msgs = check_scope_provider(None)
+    assert [m.id for m in msgs] == ["stapel_chat.W002"]
+
+
+def test_the_shipped_provider_is_a_warning_under_nats_even_if_registered_locally(settings):
+    """A local registration is invisible to the nats transport (the bus
+    dispatches by subject, not the process-local registry) — registering it
+    here must not change the verdict from the unknowable-over-the-bus case."""
+    from stapel_core.comm import function_registry
+    from stapel_core.django.mandate import MANDATE_FUNCTION, MANDATE_RESULT_KEY
+
+    settings.STAPEL_COMM = {"FUNCTION_TRANSPORT": "nats"}
+    function_registry.register(
+        MANDATE_FUNCTION, lambda payload: {MANDATE_RESULT_KEY: True}
+    )
+    try:
+        msgs = check_scope_provider(None)
+    finally:
+        function_registry._providers.pop(MANDATE_FUNCTION, None)
+    assert [m.id for m in msgs] == ["stapel_chat.W002"]
+
+
+def test_unverifiable_over_the_bus_only_touches_e005():
+    """The downgrade helper is a targeted swap, not a blanket rewrite: any
+    other issue (e.g. W001, or an issue this module does not know about
+    today) passes through untouched."""
+    from django.core import checks as django_checks
+
+    from stapel_chat.checks import _as_unverifiable_over_the_bus
+
+    other = django_checks.Warning("unrelated", id="stapel_chat.W001")
+    assert _as_unverifiable_over_the_bus(other) is other
 
 
 def test_bad_scope_provider_is_error(settings):
