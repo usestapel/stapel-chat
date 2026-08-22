@@ -15,7 +15,7 @@ cannot run with; W-level for entries that only degrade lazily.
   returns None unconditionally, by its own docstring, because nothing at boot
   can prove a bus provider is up — reading that as "workspaces present" is a
   false E005 on every such fleet regardless of whether workspaces is actually
-  there (found on the darom.ai NATS deploy). There the check downgrades E005
+  there (found on a client NATS deploy). There the check downgrades E005
   to stapel_chat.W002: it cannot verify, so it says so instead of guessing.
 - CHAT_KINDS not a subset of {direct, group, support} -> E (an unknown kind
   would be un-creatable and confuse the capability report).

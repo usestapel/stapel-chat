@@ -65,7 +65,7 @@ def test_a_real_swap_is_silent_under_nats(settings):
 
 
 def test_the_shipped_provider_is_a_warning_under_nats_when_absent(settings):
-    """stapel_chat.E005 regression (darom.ai NATS fleet): under nats,
+    """stapel_chat.E005 regression (client NATS fleet): under nats,
     comm.function_unreachable_reason returns None unconditionally — "not
     provably unreachable" is not "reachable". The check must not read a
     genuinely standalone nats deployment as having workspaces."""

@@ -11,7 +11,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 `ChatConsumer` has been resumable and store-first since 0.1.0 (hello →
 welcome → seq replay → live, seq-dedup, `REPLAY_LIMIT`, `error{resync}`), but
 every host had to invent its own mount path — none ever did, so the socket
-shipped and stayed unmounted on every deployment, including the darom fleet.
+shipped and stayed unmounted on every deployment, including the client fleet.
 
 `stapel_chat.routing.websocket_urlpatterns` mounts it at
 `ws/chat/<uuid:conversation_id>`, mirroring the one existing fleet precedent
@@ -36,7 +36,7 @@ any dotted custom transport), `comm.function_unreachable_reason` returns
 should, prove a bus provider is up. The check read that "not provably
 unreachable" as "workspaces present" and fired `E005` on every such fleet
 running the shipped provider, whether or not workspaces was actually there
-(found on the darom.ai NATS deploy).
+(found on a client NATS deploy).
 
 `E005` now only fires where the answer is provable at boot — `inprocess`/
 `http` `FUNCTION_TRANSPORT`, where the local registry or the route table
