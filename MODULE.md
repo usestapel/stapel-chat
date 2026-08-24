@@ -545,6 +545,31 @@ Regenerate after any serializer/view/url/error/axis change:
 
 then commit `docs/{schema,flows,errors,capabilities}.json`.
 
+## Running the tests — the suite declares its own siblings
+
+    pip install -e ".[test]"
+    pytest tests/
+
+The `test` extra is **the** list of what the suite needs, siblings included
+(`stapel-moderation`, `stapel-cdn`, `stapel-tools`). It is not a convenience:
+`tests/test_test_dependencies.py` parses every file of the suite — `conftest.py`
+too, and imports nested inside functions, fixtures and `try` blocks — and fails
+if a `stapel_*` package is imported without being declared here or as a runtime
+dependency. 0.5.0 was tagged and never published because that gate did not
+exist: the shared development virtualenv of this fleet has every module
+installed, so it can never be what tells you a dependency is missing.
+
+Two rules hold in this suite and are worth reusing:
+
+- **A test that claims to prove interop is never faked**, and it reaches for
+  the real sibling through `tests/siblings.requires(...)` rather than a bare
+  import at module scope. A test that proves only *this* module's half of a
+  contract must not need the sibling installed at all.
+- **A skip that can never not happen is not a test.** CI sets
+  `STAPEL_TEST_STRICT_SIBLINGS=1`, which turns a missing *declared* sibling
+  from a skip into a failure — because there the extra is installed, so a skip
+  would mean the install step silently did not run.
+
 ## App-layer override vs upstream contribution — rule of thumb
 
 **App-layer** (host project, no fork) if the change fits a seam above: a settings

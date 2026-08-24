@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-chat"
-version = "0.5.0"
+version = "0.5.1"
 description = "Conversations, messaging and support chat for the Stapel framework"
 readme = "README.md"
 license = { text = "MIT" }
@@ -51,6 +51,30 @@ realtime = ["stapel-realtime[channels]>=0.1.2,<1.0"]
 # Deprecated alias kept for one release.
 channels = ["stapel-realtime[channels]>=0.1.2,<1.0"]
 all = ["stapel-realtime[channels]>=0.1.2,<1.0"]
+# What the TEST SUITE needs, as opposed to what the package needs. It is a
+# declaration, not a convenience: every sibling any test imports belongs here,
+# and tests/test_test_dependencies.py fails if one is missing. 0.5.0 shipped
+# red on CI precisely because this list did not exist — the tests passed in a
+# shared development virtualenv that happens to have the whole fleet
+# installed, and a clean runner had none of it.
+test = [
+    "pytest",
+    "pytest-django",
+    "pytest-asyncio",
+    "pytest-cov",
+    "channels",
+    "daphne",
+    "stapel-tools>=0.9.1,<1",
+    # The moderation queue the seam tests meet for real. Optional to the
+    # package (moderation.py), required to prove interop — a fake would
+    # assert nothing but this suite's own idea of the other side.
+    "stapel-moderation>=0.3.0,<1.0",
+    # The CDN whose media vocabulary chat's attachment types must equal
+    # (0.4.0). Its two agreement tests were skipped on every CI run before
+    # this extra existed, so the agreement they claim to enforce was enforced
+    # nowhere.
+    "stapel-cdn>=0.16.0,<1.0",
+]
 
 [tool.setuptools]
 package-dir = {"stapel_chat" = "."}

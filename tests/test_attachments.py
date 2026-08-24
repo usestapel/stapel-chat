@@ -32,7 +32,16 @@ from stapel_chat.attachments import (
     reset_attachment_types,
 )
 
+from .siblings import requires
+
 pytestmark = pytest.mark.django_db
+
+#: The two agreement tests below compare this package's attachment vocabulary
+#: with stapel-cdn's own. They were written as "assert rather than agree by
+#: comment" — and then wrapped in a bare ``except ImportError: skip``, which
+#: meant they never ran on CI at all, where stapel-cdn was not installed. The
+#: package is declared in the ``test`` extra now, so they run where it counts.
+requires_cdn = requires("stapel_cdn", "stapel-cdn")
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +57,7 @@ class TestOpenRegistry:
             "image", "gif", "video", "audio", "file"
         }
 
+    @requires_cdn
     def test_the_type_names_ARE_the_cdn_kind_names(self):
         """One vocabulary, asserted rather than agreed by comment.
 
@@ -56,20 +66,17 @@ class TestOpenRegistry:
         `audio`) and that is exactly the seam defect this fleet keeps paying
         for. If the two ever diverge again, this fails.
         """
-        try:
-            from stapel_cdn.kinds import BUILTIN_MEDIA_KINDS
-        except ImportError:
-            pytest.skip("stapel-cdn is not installed in this environment")
+        from stapel_cdn.kinds import BUILTIN_MEDIA_KINDS
+
         assert set(BUILTIN_ATTACHMENT_TYPES) == set(BUILTIN_MEDIA_KINDS)
 
+    @requires_cdn
     def test_preview_kind_matches_the_cdn_for_every_builtin(self):
         """And so does what each type's preview DEPICTS — a client that
         reserves a waveform box for audio must be reserving it for the same
         reason the CDN renders one."""
-        try:
-            from stapel_cdn.kinds import BUILTIN_MEDIA_KINDS
-        except ImportError:
-            pytest.skip("stapel-cdn is not installed in this environment")
+        from stapel_cdn.kinds import BUILTIN_MEDIA_KINDS
+
         ours = {n: (s or {}).get("preview_kind") for n, s in BUILTIN_ATTACHMENT_TYPES.items()}
         theirs = {n: (s or {}).get("preview") for n, s in BUILTIN_MEDIA_KINDS.items()}
         assert ours == theirs

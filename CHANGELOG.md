@@ -4,6 +4,67 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-08-24
+
+*(0.5.0 was tagged and never reached PyPI: its moderation-seam tests imported
+`stapel_moderation` from an autouse fixture, which errored **every** test in
+the file at setup on a clean runner — `ModuleNotFoundError`, green here only
+because the shared development virtualenv has the whole fleet installed. The
+release gate did its job. **0.5.0 does not exist on PyPI — floor on
+`>=0.5.1`**; this release is 0.5.0's feature set unchanged, plus the gate
+below. Third instance of this class in one night, after stapel-core 0.44.0 and
+a stapel-tools nav-manifest test, which is why the fix is a mechanism rather
+than an import.)*
+
+### Fixed — the test suite now declares what it needs, and it is checkable
+
+**`[project.optional-dependencies].test`** is new: the siblings this suite
+imports, named in one place, installed by CI as `pip install -e ".[test]"`
+instead of a hand-kept package list in a workflow file that no test could
+disagree with. `stapel-moderation` and `stapel-cdn` are in it.
+
+**`tests/test_test_dependencies.py`** is the gate. It parses every file of the
+suite — including `conftest.py`, and including imports nested inside
+functions, fixtures and `try` blocks, which is where both of tonight's hid —
+collects the `stapel_*` packages they import, and fails if one is declared
+neither as a runtime dependency nor in the `test` extra. "It works in my venv"
+stops being a dependency declaration; `pyproject.toml` is. A second test walks
+the other direction so the extra cannot rot into a wish list.
+
+**The quieter half of the same defect is also closed.** 0.4.0 added two tests
+asserting that chat's attachment types and stapel-cdn's `BUILTIN_MEDIA_KINDS`
+are the same set — "asserted rather than agreed by comment". They were wrapped
+in `except ImportError: pytest.skip(...)`, stapel-cdn was installed on no CI
+runner, and so the agreement was enforced **nowhere** while the changelog said
+it was enforced. A skip that can never not happen is not a test. stapel-cdn is
+declared now and both tests run.
+
+**`STAPEL_TEST_STRICT_SIBLINGS=1`** (set by both workflows) turns a missing
+declared sibling from a skip into a failure. On CI the extra is installed, so
+a skip there means the install step did not do what the workflow says — and
+that would be exactly this bug wearing its other face.
+
+### Changed — which tests meet the real module, and which do not
+
+The split in `tests/test_moderation_seam.py` is deliberate and is the rule
+worth reusing: **a test that claims to prove interop is never faked, and a
+test that proves only this module's half must not need the sibling
+installed.**
+
+- Chat's own half — the `chat.moderation_content` Function, the tombstone and
+  erasure rules, the composite `<conversation_id>:<message_id>` key — needs no
+  moderation queue at all. It never did; only the autouse fixture did. That
+  fixture is now requested by name, by the tests that actually want it.
+- The interop half — registering the target type and reading a message back
+  through `stapel_moderation.services.fetch_content`, the host-declaration
+  precedence, the reachability of the registered `content_function` — still
+  runs against the real stapel-moderation, which is now installed on CI. A
+  registered fake there would assert nothing but this suite's own idea of the
+  other side of the seam.
+
+No library code changed in this release. `stapel_chat` 0.5.1 is byte-for-byte
+0.5.0 in everything a host imports.
+
 ## [0.5.0] - 2026-08-24
 
 ### Added — a message can be reported, and the report is about the message

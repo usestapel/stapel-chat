@@ -32,10 +32,19 @@ jobs:
       - name: Import check
         run: python -c "import stapel_chat; print('import OK')"
 
-      - name: Install test dependencies
-        run: pip install pytest pytest-django pytest-asyncio pytest-cov channels daphne "stapel-tools>=0.9.1,<1"
+      # ONE declaration of what the suite needs, in pyproject's `test` extra —
+      # never a hand-kept list in a workflow file that drifts from what the
+      # tests actually import. 0.5.0 shipped red because no such declaration
+      # existed and a sibling was imported anyway.
+      - name: Install test dependencies (the declared `test` extra)
+        run: pip install -e ".[test]"
 
       - name: Tests with coverage
+        # Strict siblings: a declared sibling that is missing FAILS instead of
+        # skipping. A quiet skip on CI means the install step above did not do
+        # what it says, which is the other half of this defect class.
+        env:
+          STAPEL_TEST_STRICT_SIBLINGS: "1"
         run: |
           pytest tests/ \
             --cov=stapel_chat \

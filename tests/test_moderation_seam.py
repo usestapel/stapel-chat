@@ -17,12 +17,29 @@ from stapel_chat.moderation import (
     register_moderation_target,
 )
 
+from .siblings import requires
+
 pytestmark = pytest.mark.django_db
 
+#: stapel-moderation is an OPTIONAL dependency of this package (moderation.py)
+#: and a DECLARED one of its test suite (``pip install -e ".[test]"``). The
+#: split below is deliberate: everything above the "Registration" heading
+#: proves *chat's* half of the contract — the comm Function, the tombstone
+#: rule, the composite key — and must run on a machine that has never heard of
+#: the moderation queue. Only the interop tests, which prove the two modules
+#: actually meet, reach for the real module; those are never faked, because a
+#: fake would assert nothing but this file's own idea of the other side.
+requires_moderation = requires("stapel_moderation", "stapel-moderation")
 
-@pytest.fixture(autouse=True)
-def _clean_moderation_registry():
-    """Target types are process-global; leave the registry as we found it."""
+
+@pytest.fixture
+def clean_moderation_registry():
+    """Target types are process-global; leave the registry as we found it.
+
+    Requested explicitly (not autouse) by the interop tests alone — an autouse
+    fixture importing an optional sibling errors *every* test in the file at
+    setup on a clean runner, which is exactly how 0.5.0 shipped red.
+    """
     from stapel_moderation.registry import reset_registries
 
     reset_registries()
@@ -125,7 +142,10 @@ def test_erasure_takes_the_content_out_of_the_moderation_card_too(user, other_us
 # ── Registration into stapel-moderation ──────────────────────────────
 
 
-def test_the_target_registers_and_moderation_can_read_a_message(user, other_user):
+@requires_moderation
+def test_the_target_registers_and_moderation_can_read_a_message(
+    user, other_user, clean_moderation_registry
+):
     """The seam end to end, through stapel-moderation's own reader: the queue
     knows nothing about chat, calls a name, and gets the message."""
     from stapel_moderation import services as moderation
@@ -141,7 +161,10 @@ def test_the_target_registers_and_moderation_can_read_a_message(user, other_user
     assert content.extra["conversation_id"] == str(conv.id)
 
 
-def test_moderation_reads_a_tombstone_as_target_not_found(user, other_user):
+@requires_moderation
+def test_moderation_reads_a_tombstone_as_target_not_found(
+    user, other_user, clean_moderation_registry
+):
     """404, not 503: nothing is down, there is nothing left to look at. The
     difference decides whether a case is dismissed or parked waiting for a
     row that is never coming back."""
@@ -157,7 +180,8 @@ def test_moderation_reads_a_tombstone_as_target_not_found(user, other_user):
         moderation.fetch_content(MESSAGE_TARGET_TYPE, str(msg.id))
 
 
-def test_a_host_declaration_wins_over_ours(settings):
+@requires_moderation
+def test_a_host_declaration_wins_over_ours(settings, clean_moderation_registry):
     """The runtime registry layer outranks settings, so registering
     unconditionally would silently overwrite a composite's deliberate policy
     — stapel-classified declares this very type. Fill the gap, never
@@ -182,12 +206,14 @@ def test_a_host_declaration_wins_over_ours(settings):
     assert policy["reasons"] == ["harassment"]
 
 
-def test_registering_a_second_time_is_a_no_op():
+@requires_moderation
+def test_registering_a_second_time_is_a_no_op(clean_moderation_registry):
     assert register_moderation_target() is True
     assert register_moderation_target() is False
 
 
-def test_the_empty_setting_registers_nothing(settings):
+@requires_moderation
+def test_the_empty_setting_registers_nothing(settings, clean_moderation_registry):
     from stapel_moderation.registry import get_target_types
 
     settings.STAPEL_CHAT = {"MODERATION_TARGET_TYPE": ""}
@@ -196,7 +222,8 @@ def test_the_empty_setting_registers_nothing(settings):
     assert MESSAGE_TARGET_TYPE not in get_target_types()
 
 
-def test_the_registered_policy_names_a_reachable_function():
+@requires_moderation
+def test_the_registered_policy_names_a_reachable_function(clean_moderation_registry):
     """Declared AND connected — the "declared but never wired" defect the
     moderation module exists to catch, asserted on our own registration."""
     from stapel_core.comm import function_unreachable_reason
