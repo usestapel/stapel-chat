@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-chat"
-version = "0.3.1"
+version = "0.4.0"
 description = "Conversations, messaging and support chat for the Stapel framework"
 readme = "README.md"
 license = { text = "MIT" }
@@ -24,10 +24,11 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # Floor: 0.41.0 — the canonical SerializerSeamMixin/StapelAPIView
-    # (0.37.0), and the deletion gate whose reasoning the message tombstone
-    # reuses (0.40.0 + its mint half in 0.41.0).
-    "stapel-core>=0.41.0,<1.0",
+    # Floor: 0.43.0 — the canonical SerializerSeamMixin/StapelAPIView
+    # (0.37.0), the deletion gate whose reasoning the message tombstone reuses
+    # (0.40.0 + its mint half in 0.41.0), and the floor stapel-cdn 0.16.0 —
+    # whose render metadata this module consumes — already stands on.
+    "stapel-core>=0.43.0,<1.0",
     # The WebSocket substrate. Not an extra: since 0.3.0 realtime is the
     # canonical path, and chat's stream keys, wire envelope and consumers are
     # all stapel-realtime's. Importing it costs nothing without Channels.

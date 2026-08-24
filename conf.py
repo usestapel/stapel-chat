@@ -59,7 +59,8 @@ DEFAULTS = {
     # this length are rejected up front.
     "MAX_BODY_LENGTH": 4000,
     # OPEN attachment-type registry (attachments.py). Merged OVER the builtins
-    # {image, gif, video, voice, file}; a value of None removes a builtin. The
+    # {image, gif, video, audio, file} — the SAME names as stapel-cdn's media
+    # kinds; a value of None removes a builtin. The
     # entry declares `fields` — what a UI may expect populated for the type —
     # and `media` — whether the ref resolves to a CDN asset worth describing.
     "ATTACHMENT_TYPES": {},
@@ -74,10 +75,14 @@ DEFAULTS = {
     "ATTACHMENT_METADATA": "cdn",
     # Most attachments one message may carry.
     "MAX_ATTACHMENTS": 10,
-    # Ceiling on an inline base64 preview (micro-thumbnail / waveform) in
-    # bytes. These are untrusted bytes on their way to other people's screens
-    # and they ride inside every message frame; a ~16px webp is ~300 bytes.
-    "MAX_PREVIEW_B64_BYTES": 8192,
+    # Ceiling on an inline base64 preview in bytes. Matches stapel-cdn's own
+    # MICRO_PREVIEW_MAX_BYTES default, measured the same way (on the finished
+    # data: URI, base64 expansion included) — a second, larger number here
+    # would accept what the authority already refused. These are untrusted
+    # bytes riding inside every message frame on their way to other people's
+    # screens, and they multiply: MAX_ATTACHMENTS x this is the per-message
+    # payload floor a client pays for previews.
+    "MAX_PREVIEW_B64_BYTES": 4096,
     # Seconds an author may still edit their own message. 0 = no window.
     "EDIT_WINDOW_S": 0,
     # Dotted path to a ScopeProvider — resolves the opaque scope_key from a

@@ -669,7 +669,7 @@
       },
       "AttachmentResponse": {
         "type": "object",
-        "description": "One attachment, carrying everything a bubble needs to paint on first\nframe — no second round trip, and no reflow when the asset lands.\n\nEvery field is present on every attachment, ``null`` where it does not\napply or the CDN has not produced it yet; which of them a given ``type``\nis expected to populate is declared by the attachment-type registry\n(:mod:`stapel_chat.attachments`), which is open — ``sticker`` is a\nsettings line, not a release.",
+        "description": "One attachment, carrying everything a bubble needs to paint on first\nframe — no second round trip, and no reflow when the asset lands.\n\nEvery field is present on every attachment, ``null`` where it does not\napply or the CDN has not produced it yet; which of them a given ``type``\nis expected to populate is declared by the attachment-type registry\n(:mod:`stapel_chat.attachments`), which is open — a sticker is a settings\nline, not a release.\n\nThe names are **stapel-cdn's** (`cdn.describe`), because they name the\nsame things and two vocabularies for one thing is how a seam rots.",
         "properties": {
           "key": {
             "type": "string",
@@ -677,7 +677,7 @@
           },
           "type": {
             "type": "string",
-            "description": "Registry type — ``image`` / ``gif`` / ``video`` / ``voice`` /"
+            "description": "Registry type, and the CDN's media ``kind``: ``image`` / ``gif``"
           },
           "mime": {
             "type": "string",
@@ -697,7 +697,7 @@
           "ext": {
             "type": "string",
             "nullable": true,
-            "description": "Lowercase extension without the dot (documents)"
+            "description": "Lowercase extension (documents)"
           },
           "width": {
             "type": "integer",
@@ -715,20 +715,44 @@
             "nullable": true,
             "description": "``width / height`` — the number that reserves the box before"
           },
+          "square": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Whether the asset is square within a pixel"
+          },
+          "animated": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Whether it moves, so a UI offers a play affordance rather"
+          },
           "duration_ms": {
             "type": "integer",
             "nullable": true,
-            "description": "Playback length (voice/video)"
+            "description": "Playback length (audio/video). ``null`` means"
           },
           "preview_b64": {
             "type": "string",
             "nullable": true,
-            "description": "~16px webp micro-thumbnail as a ``data:`` URI — the"
+            "description": "The inline placeholder as a ``data:image/webp;base64,…``"
           },
-          "waveform_b64": {
+          "preview_kind": {
             "type": "string",
             "nullable": true,
-            "description": "Waveform image as a ``data:`` URI (voice)"
+            "description": "What ``preview_b64`` depicts — ``blur`` (a 16px LQIP),"
+          },
+          "poster_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "A video's full poster image, present only once the poster"
+          },
+          "meta_status": {
+            "type": "string",
+            "description": "``ok`` / ``partial`` / ``missing``"
+          },
+          "meta_reason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Why, whenever the status is not ``ok``"
           },
           "variants": {
             "type": "array",

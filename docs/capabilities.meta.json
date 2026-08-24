@@ -15,7 +15,7 @@
     {
       "module": "stapel-cdn",
       "optional": true,
-      "reason": "attachment render metadata — chat calls cdn.describe by comm to denormalize aspect, byte size, the 16px micro-thumbnail, video poster and duration, and the voice waveform, once, at send time. Optional: without it a message still sends carrying whatever the client supplied."
+      "reason": "attachment render metadata — chat calls cdn.describe_many by comm to denormalize aspect, byte size, the micro-thumbnail, the video poster and the voice waveform once at send time, and shares one type vocabulary with its media-kind registry. Optional: without it a message still sends carrying whatever the client supplied."
     },
     {
       "module": "stapel-realtime",
@@ -189,7 +189,7 @@
     },
     "ATTACHMENT_TYPES": {
       "business_label": "Which kinds of attachment exist",
-      "summary": "The catalogue of attachment kinds this deployment accepts. Out of the box: photos, animated GIFs, video, voice messages and documents. It is an open list, not a fixed one — a product that wants stickers, locations or contact cards adds them in configuration, and the API accepts them the same day. Removing a kind (say, voice) refuses it at the boundary.",
+      "summary": "The catalogue of attachment kinds this deployment accepts. Out of the box: photos, animated GIFs, video, voice/audio and documents — named exactly as stapel-cdn names them, so the two never drift into two vocabularies for one thing. It is an open list: a product that wants stickers, locations or contact cards adds them in configuration and the API accepts them the same day.",
       "behavior": "Merged over the builtins; a value of None removes a builtin. A message naming an unregistered type is rejected (400)."
     },
     "ACTIVITY_STATES": {
@@ -199,7 +199,7 @@
     },
     "ATTACHMENT_METADATA": {
       "business_label": "Where attachment previews come from",
-      "summary": "\"cdn\" (the default) asks the CDN to describe every attachment as it is sent, so thumbnails, aspect ratios, durations and waveforms are computed once by the service that owns the file. \"client\" trusts what the sender's app supplied and makes no call — faster, and only sound where the sender is trusted.",
+      "summary": "\"cdn\" (the default) asks the CDN to describe a message's attachments in one call as it is sent, so thumbnails, aspect ratios, durations and waveforms are computed once by the service that owns the file. \"client\" trusts what the sender's app supplied and makes no call — faster, and only sound where the sender is trusted.",
       "behavior": "cdn: the describe answer is merged over the client's fields; an unreachable CDN leaves the client's values in place rather than failing the send. client: no call is made."
     },
     "MAX_ATTACHMENTS": {
@@ -209,7 +209,7 @@
     },
     "MAX_PREVIEW_B64_BYTES": {
       "business_label": "Maximum inline preview size",
-      "summary": "Ceiling on the tiny preview image that travels inside the message itself (the blur-up thumbnail, the voice waveform). A real 16px preview is a few hundred bytes; the cap exists because these are bytes from one user rendered on another user's screen.",
+      "summary": "Ceiling on the tiny preview image that travels inside the message itself (the blur-up thumbnail, the video poster, the voice waveform). Matches the CDN's own budget deliberately — a larger number here would accept what the authority already refused. The cap exists because these are bytes from one user rendered on another user's screen, and they multiply by the number of attachments on the page.",
       "behavior": "An inline preview over this size, or one that is not an image data URI, is rejected (400)."
     },
     "EDIT_WINDOW_S": {

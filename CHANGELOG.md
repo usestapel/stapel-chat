@@ -4,6 +4,89 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-24
+
+### ⚠️ BREAKING — chat and the CDN now speak one vocabulary instead of two
+
+**stapel-cdn 0.16.0 shipped the metadata half of the attachment contract this
+module defined in 0.3.x**, and it named some of the same things differently.
+Rather than translate between the two, chat adopts the CDN's names. Two names
+for one thing, kept in step by comment, is the exact class of seam defect this
+fleet keeps paying for — and it is much cheaper to close it now, with one
+consumer, than after a frontend has been built against both.
+
+| 0.3.x | 0.4.0 | why |
+|---|---|---|
+| type `voice` | type **`audio`** | the CDN's media kind for it. A voice-note bubble is a render choice; `audio` is what the thing *is* |
+| `waveform_b64` | **`preview_b64` + `preview_kind: "waveform"`** | one preview slot, one discriminator — see below |
+| — | `preview_kind`, `poster_url`, `square`, `animated`, `meta_status`, `meta_reason` | new, all from the CDN |
+
+Two tests now assert the agreement rather than a comment: chat's builtin
+attachment types and the CDN's `BUILTIN_MEDIA_KINDS` must be the same set, and
+each type's `preview_kind` must equal the CDN's `preview`. If they ever drift
+again, the suite fails.
+
+### Changed — the preview is a pair, on purpose
+
+`preview_b64` is the bytes; `preview_kind` says what they depict (`blur` /
+`poster` / `waveform` / `null`). They are two fields and not one nullable field
+because **`preview_kind` follows from the type, so it is known before any
+preview exists** — a client can reserve a waveform-shaped box for a voice note
+whose waveform the CDN is still rendering. That is the whole point of not
+jumping the layout, and collapsing the pair throws it away. The client does not
+get to assert `preview_kind` either; the registry decides it.
+
+### Changed — one comm call per message, not one per attachment
+
+Enrichment moved from `cdn.describe` (one ref) to **`cdn.describe_many`** (a
+page), which resolves in one query per model. A ten-attachment message costs
+one round trip instead of ten. Batches are paged at the CDN's limit of **50
+refs per call**, because every snapshot may inline a preview and so the batch
+size *is* the response size.
+
+### Changed — degradation is data, and so is a dead ref
+
+- **`meta_status` / `meta_reason` travel with every attachment.** A degraded
+  attachment stays renderable, and the reason is named (`ffmpeg_missing`,
+  `not_generated`, `preview_over_budget`, `unknown_ref`) so a client can tell
+  "still generating" from "this deployment has no ffmpeg" and draw the right
+  placeholder for each. An attachment nothing has described yet says so —
+  `missing` / `not_described` — rather than presenting unexplained nulls.
+- **An unresolvable ref comes back as data, not an exception**, mirroring
+  `describe_many`: a message with one dead attachment still renders the other
+  nine, and that one carries `meta_reason: "unknown_ref"`.
+- **`duration_ms: null` from the CDN now overwrites a client's guess.** `null`
+  means *unmeasured* and never zero — a zero-length voice message and an
+  unmeasured one are different facts a UI draws differently — so a sender's
+  optimistic number must not survive the authority saying it does not know.
+  (`preview_b64`, `preview_kind` and `poster_url` are authoritative-null the
+  same way; everything else still falls back to the client's value when the
+  CDN is silent, which is what keeps a send working during an outage.)
+
+### Changed
+
+- **`MAX_PREVIEW_B64_BYTES` default 8192 → 4096**, matching stapel-cdn's
+  `MICRO_PREVIEW_MAX_BYTES` and measured the same way (on the finished `data:`
+  URI). A larger number here would have accepted what the authority already
+  refused. With `MAX_ATTACHMENTS` at 10 that bounds previews at ~40 KB per
+  message; the CDN enforces its own budget by downgrade-then-refuse, never
+  truncation, so an over-budget preview arrives as `null` plus a reason rather
+  than as a broken image.
+- **`stapel-core` floor `>=0.43.0`** (was `0.41.0`) — the floor stapel-cdn
+  0.16.0 already stands on. The canonical `SerializerSeamMixin` was adopted in
+  0.3.0 and the local copy is already gone.
+
+### Migration
+
+Stored attachments from 0.3.x keep working — `type: "voice"` simply is not a
+registered type any more, so a host that shipped 0.3.x voice messages either
+re-registers it (`STAPEL_CHAT = {"ATTACHMENT_TYPES": {"voice": {...}}}`) or
+rewrites those rows to `audio`. Given 0.3.1 was on PyPI for under an hour and
+0.3.0 never published at all, no data migration ships for it: inventing one
+would be ceremony for rows that do not exist.
+
+**Tests:** 164 pass (155 on 0.3.1) — the nine new ones cover the batch call, the shared vocabulary, the authoritative null and the named degradation.
+
 ## [0.3.1] - 2026-08-24
 
 ### Fixed — 0.3.0's tag could not be installed

@@ -1,36 +1,48 @@
 """The attachment type registry, and the render metadata a UI needs up front.
 
-Two things live here, and they are the same thing seen from two sides.
+**stapel-cdn owns this metadata; this module consumes it.** Since stapel-cdn
+0.16.0 the whole snapshot — aspect, byte size, the 16px WebP preview, the video
+poster, the voice waveform, and a *named reason* whenever one of them is
+absent — arrives from one comm call. Nothing here re-derives any of it:
+transcoding a preview or measuring a duration is the CDN's job, and a second
+implementation would be a second answer to "how big is this picture".
 
-**The registry** (``ATTACHMENT_TYPES``) is a merge-over-builtins registry, the
-same idiom as every other Stapel registry: builtins <- ``STAPEL_CHAT
-["ATTACHMENT_TYPES"]`` <- :func:`register_attachment_type`, later wins, a
-value of ``None`` REMOVES a type. It is deliberately **not** a closed enum,
-because the next attachment kind is already named — stickers — and a closed
-enum would make that a contract change instead of a settings line.
+One vocabulary, not two
+-----------------------
+The attachment ``type`` names are **the CDN's ``kind`` names**: ``image``,
+``gif``, ``video``, ``audio``, ``file``, plus whatever a host registers in
+both. They were briefly allowed to drift (chat said ``voice`` where the CDN
+said ``audio``) and that is precisely the seam defect this fleet keeps paying
+for — two names for one thing, agreeing by comment. They agree by construction
+now, and a test asserts it.
 
-**The metadata** is what an attachment must carry so a chat bubble renders
-*on first paint*: no second round trip, and no layout jump while the real
-asset loads. That is one requirement, not a nicety — a message list that
-reflows after every image is the visible symptom of an attachment contract
-that shipped only a storage key.
+**The registry is OPEN**, merge-over-builtins: builtins <- ``STAPEL_CHAT
+["ATTACHMENT_TYPES"]`` <- :func:`register_attachment_type`, later wins, a value
+of ``None`` REMOVES a type. The CDN's ``MEDIA_KINDS`` is the same shape, so a
+host adds stickers to both with two dict literals and no fork.
 
-    image / gif   aspect + bytes + a ~16px base64 micro-thumbnail
-    video         aspect + bytes + duration + a poster (same micro-thumb slot)
-    voice         duration + a base64 waveform image
-    file          mime + extension (+ the original name)
+The preview pair
+----------------
+``preview_b64`` is the bytes; ``preview_kind`` is what they depict — ``blur``
+(a 16px LQIP), ``poster`` (a video frame), ``waveform`` (an amplitude strip) or
+``null`` (a document: there is nothing to show but an icon). They are **two
+fields on purpose**. ``preview_kind`` is known from the type alone, so a client
+knows what shape of placeholder to reserve *before* the preview exists —
+which is the entire point of not jumping the layout. Collapsing them into one
+nullable field throws that away.
 
-The **bytes never travel through this module** (models.py: no file storage).
-An attachment is an opaque CDN ref plus the render snapshot that the CDN
-computed for it. This module *asks* for that snapshot by comm — ``call
-("cdn.describe", {"ref": ...})`` — and never re-derives it: transcoding a
-16px webp, measuring an aspect or drawing a waveform is stapel-cdn's job and
-duplicating it here would be a second answer to "how big is this picture".
+Degradation is data, never an exception
+---------------------------------------
+``meta_status`` (``ok`` / ``partial`` / ``missing``) and ``meta_reason`` travel
+with every attachment, so a client can tell "still generating" from "this
+deployment has no ffmpeg" and draw the right placeholder for each. In the same
+spirit, a ref the CDN cannot resolve comes back in ``missing`` rather than
+raising: a message with one dead attachment still renders the other nine.
+``duration_ms`` is ``null`` when unmeasured and never ``0`` — a zero-length
+voice message and an unmeasured one are different facts.
 
-The CDN's answer is authoritative and is merged **over** whatever the client
-sent. A client may pre-fill the same fields (it just uploaded the file and
-knows them), which is what keeps a send working when the metadata provider is
-unreachable: the send is not failed over a courtesy field.
+The bytes never travel through this module (models.py: no file storage). An
+attachment is an opaque CDN ref plus the snapshot the CDN computed for it.
 """
 from __future__ import annotations
 
@@ -54,45 +66,71 @@ BASE_FIELDS = (
     "width",
     "height",
     "aspect",
+    "square",
+    "animated",
     "duration_ms",
     "preview_b64",
-    "waveform_b64",
+    "preview_kind",
+    "poster_url",
+    "meta_status",
+    "meta_reason",
     "variants",
 )
 
-#: Builtin attachment types. ``fields`` is what a UI may *expect* to be
-#: populated for this type — it is a rendering contract, not a validation
-#: rule: the CDN produces a micro-thumbnail asynchronously, so an image whose
-#: ``preview_b64`` has not been generated yet must still be sendable.
-#: ``media`` marks the types whose ref resolves to a CDN asset worth
-#: describing.
+#: Builtin attachment types — **the same names as stapel-cdn's builtin media
+#: kinds** (``stapel_cdn.kinds.BUILTIN_MEDIA_KINDS``), because they name the
+#: same thing and two names for one thing is how seams rot.
+#:
+#: ``fields`` is what a UI may *expect* populated for this type — a rendering
+#: contract, not a validation rule: the CDN generates previews asynchronously,
+#: so an image whose ``preview_b64`` is not ready yet must still be sendable
+#: (it arrives with ``meta_status: "partial"`` and a named reason).
+#: ``preview_kind`` is what this type's ``preview_b64`` will depict, known
+#: from the type alone so a client can reserve the right placeholder before
+#: any preview exists. ``media`` marks the types whose ref resolves to a CDN
+#: asset worth describing.
 BUILTIN_ATTACHMENT_TYPES: dict[str, Optional[dict]] = {
     "image": {
-        "fields": ("mime", "bytes", "width", "height", "aspect", "preview_b64", "variants"),
+        "fields": (
+            "mime", "bytes", "width", "height", "aspect", "square",
+            "preview_b64", "variants",
+        ),
+        "preview_kind": "blur",
         "media": True,
     },
     # A GIF is an image on the wire and an animation on the screen; it gets
-    # its own type so a client can decide to autoplay without sniffing mime.
+    # its own type so a client can offer a play affordance without sniffing
+    # mime. `animated` is true for it in the CDN's registry too.
     "gif": {
-        "fields": ("mime", "bytes", "width", "height", "aspect", "preview_b64", "variants"),
+        "fields": (
+            "mime", "bytes", "width", "height", "aspect", "animated",
+            "preview_b64", "variants",
+        ),
+        "preview_kind": "blur",
         "media": True,
     },
     "video": {
         "fields": (
             "mime", "bytes", "width", "height", "aspect", "duration_ms",
-            "preview_b64", "variants",
+            "preview_b64", "poster_url", "variants",
         ),
+        "preview_kind": "poster",
         "media": True,
     },
-    # A voice message. `waveform_b64` is the preview image drawn by the CDN,
-    # not a float array — the client paints one <img>, not a canvas loop.
-    "voice": {
-        "fields": ("mime", "bytes", "duration_ms", "waveform_b64"),
+    # A voice message. Its `preview_b64` is a rendered waveform IMAGE — the
+    # client paints one <img>, not a canvas loop over a float array. Named
+    # `audio` and not `voice`: that is the CDN's kind for it, and the two
+    # registries are one vocabulary.
+    "audio": {
+        "fields": ("mime", "bytes", "duration_ms", "preview_b64"),
+        "preview_kind": "waveform",
         "media": True,
     },
     # A document. Extension and mime are the whole render: an icon and a name.
+    # There is nothing to preview, so `preview_kind` is None.
     "file": {
         "fields": ("mime", "bytes", "name", "ext"),
+        "preview_kind": None,
         "media": True,
     },
 }
@@ -192,64 +230,134 @@ def normalize_attachment(raw) -> dict:
         raise UnknownAttachmentType(kind)
 
     limit = int(chat_settings.MAX_PREVIEW_B64_BYTES)
+    spec = get_attachment_types()[kind] or {}
     out = dict(raw)
     out["key"] = key.strip()
     out["type"] = kind
     out["preview_b64"] = _check_data_uri(raw.get("preview_b64"), "preview_b64", limit)
-    out["waveform_b64"] = _check_data_uri(raw.get("waveform_b64"), "waveform_b64", limit)
     for field in BASE_FIELDS:
         out.setdefault(field, None)
+    # preview_kind follows from the TYPE, so it is known before any preview
+    # exists — that is what lets a client reserve a waveform-shaped box for a
+    # voice note whose waveform the CDN is still rendering. The client does not
+    # get to assert it; the registry decides.
+    out["preview_kind"] = spec.get("preview_kind")
     if out.get("ext") is None:
         out["ext"] = _guess_ext(out.get("name"), out.get("mime"))
+    # Nothing has been asked of the CDN yet, so nothing is confirmed. A named
+    # status from the start means no consumer ever meets an unexplained null.
+    if out.get("meta_status") is None:
+        out["meta_status"] = "missing"
+        out["meta_reason"] = out.get("meta_reason") or "not_described"
     return out
 
 
 # ── CDN enrichment (comm, never an import) ───────────────────────────────
 
-#: Keys of ``cdn.describe``'s render snapshot this module denormalizes. The
-#: CDN owns every one of them; anything it returns that is not listed is
-#: carried through untouched so a new CDN field reaches a client without a
-#: release here.
+#: Snapshot keys this module denormalizes onto an attachment. The CDN owns
+#: every one of them. Anything else it returns is carried through untouched,
+#: which is what lets a new CDN field reach a client with no release here.
 _DESCRIBE_FIELDS = (
-    "mime", "bytes", "width", "height", "aspect", "duration_ms",
-    "preview_b64", "waveform_b64", "variants",
+    "mime", "ext", "bytes", "width", "height", "aspect", "square", "animated",
+    "duration_ms", "preview_b64", "preview_kind", "poster_url",
+    "meta_status", "meta_reason", "variants",
 )
 
+#: Keys whose ``None`` from the CDN is a FACT, not an absence, and must
+#: overwrite whatever the client claimed.
+#:
+#: ``duration_ms`` is the one that matters: the CDN returns ``null`` for
+#: unmeasured and never ``0``, because a zero-length voice message and an
+#: unmeasured one are different things a UI draws differently. If a sender's
+#: optimistic guess survived a CDN ``null``, that distinction would be lost at
+#: exactly the moment the authority said it did not know.
+_AUTHORITATIVE_NULLS = ("duration_ms", "preview_b64", "preview_kind", "poster_url")
 
-def describe_attachment(attachment: dict) -> dict:
-    """Merge ``cdn.describe``'s snapshot over one normalized attachment.
+#: ``cdn.describe_many`` refuses more than this per call, because each snapshot
+#: may inline a preview and so the batch size IS the response size. Mirrored
+#: rather than imported — cross-module is comm by string name.
+DESCRIBE_BATCH_LIMIT = 50
 
-    Best-effort by design. An unknown ref, an unreachable CDN, a comm
-    transport that is not wired — all leave the client-supplied fields in
-    place and log. A chat message must not fail to send because a metadata
-    provider blinked; the worst case is a bubble that renders from the
-    sender's own numbers.
-    """
-    spec = get_attachment_types().get(attachment.get("type")) or {}
-    if not spec.get("media"):
-        return attachment
-    try:
-        from stapel_core.comm import call
 
-        snapshot = call("cdn.describe", {"ref": attachment["key"]}) or {}
-    except Exception:
-        logger.info(
-            "chat: cdn.describe unavailable for %r; keeping client metadata",
-            attachment.get("key"),
-            exc_info=True,
-        )
-        return attachment
+def _apply_snapshot(attachment: dict, snapshot: dict) -> dict:
+    """Merge one CDN snapshot over one normalized attachment."""
     if not isinstance(snapshot, dict):
         return attachment
     out = dict(attachment)
     for field, value in snapshot.items():
-        if value is None:
+        if value is None and field not in _AUTHORITATIVE_NULLS:
             continue
         if field in _DESCRIBE_FIELDS or field not in BASE_FIELDS:
             out[field] = value
     if out.get("ext") is None:
         out["ext"] = _guess_ext(out.get("name"), out.get("mime"))
     return out
+
+
+def _unresolved(attachment: dict) -> dict:
+    """Mark an attachment the CDN could not resolve — as data, never as an
+    exception. A message with one dead attachment still renders the rest."""
+    out = dict(attachment)
+    out["meta_status"] = "missing"
+    out["meta_reason"] = "unknown_ref"
+    return out
+
+
+def describe_attachments(attachments: list[dict]) -> list[dict]:
+    """Merge the CDN's render snapshots over a whole list, in ONE comm call.
+
+    ``cdn.describe_many`` resolves a page of refs with one query per model, so
+    a message's attachments cost one round trip rather than N — the per-ref
+    call was the only thing left making it N.
+
+    Best-effort by design. An unreachable CDN, an unwired comm transport, a
+    provider that is simply not installed: all leave the client-supplied
+    fields in place and log. A chat message must not fail to send because a
+    metadata provider blinked; the worst case is a bubble that renders from
+    the sender's own numbers. A ref the CDN *can* answer about but does not
+    know is a different case, and it comes back as ``meta_status: "missing"``
+    on that one attachment.
+    """
+    describable = [
+        a for a in attachments
+        if (get_attachment_types().get(a.get("type")) or {}).get("media")
+    ]
+    if not describable:
+        return attachments
+
+    snapshots: dict[str, dict] = {}
+    missing: set[str] = set()
+    refs = list(dict.fromkeys(a["key"] for a in describable))
+    try:
+        from stapel_core.comm import call
+
+        for start in range(0, len(refs), DESCRIBE_BATCH_LIMIT):
+            page = refs[start:start + DESCRIBE_BATCH_LIMIT]
+            answer = call("cdn.describe_many", {"refs": page}) or {}
+            snapshots.update(answer.get("items") or {})
+            missing.update(answer.get("missing") or [])
+    except Exception:
+        logger.info(
+            "chat: cdn.describe_many unavailable for %d ref(s); "
+            "keeping client metadata", len(refs), exc_info=True,
+        )
+        return attachments
+
+    out = []
+    for attachment in attachments:
+        key = attachment.get("key")
+        if key in snapshots:
+            out.append(_apply_snapshot(attachment, snapshots[key]))
+        elif key in missing:
+            out.append(_unresolved(attachment))
+        else:
+            out.append(attachment)
+    return out
+
+
+def describe_attachment(attachment: dict) -> dict:
+    """:func:`describe_attachments` for a single attachment."""
+    return describe_attachments([attachment])[0]
 
 
 def prepare_attachments(raws) -> list[dict]:
@@ -264,7 +372,7 @@ def prepare_attachments(raws) -> list[dict]:
     normalized = [normalize_attachment(item) for item in items]
     if str(chat_settings.ATTACHMENT_METADATA) != "cdn":
         return normalized
-    return [describe_attachment(item) for item in normalized]
+    return describe_attachments(normalized)
 
 
 __all__ = [
@@ -272,8 +380,10 @@ __all__ = [
     "BUILTIN_ATTACHMENT_TYPES",
     "InvalidAttachment",
     "UnknownAttachmentType",
+    "DESCRIBE_BATCH_LIMIT",
     "attachment_type_names",
     "describe_attachment",
+    "describe_attachments",
     "get_attachment_types",
     "normalize_attachment",
     "prepare_attachments",

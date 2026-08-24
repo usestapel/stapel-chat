@@ -138,9 +138,14 @@ def attachment_to_dto(raw: dict) -> AttachmentResponse:
         width=raw.get("width"),
         height=raw.get("height"),
         aspect=raw.get("aspect"),
+        square=raw.get("square"),
+        animated=raw.get("animated"),
         duration_ms=raw.get("duration_ms"),
         preview_b64=raw.get("preview_b64"),
-        waveform_b64=raw.get("waveform_b64"),
+        preview_kind=raw.get("preview_kind"),
+        poster_url=raw.get("poster_url"),
+        meta_status=raw.get("meta_status") or "missing",
+        meta_reason=raw.get("meta_reason"),
         variants=list(raw.get("variants") or []),
     )
 

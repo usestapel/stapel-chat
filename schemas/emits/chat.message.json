@@ -3,48 +3,223 @@
   "title": "chat.message",
   "description": "A message was appended to a conversation, written into the outbox in the same transaction as the row. Downstreams (search index, notifier) subscribe. `seq` is the message's position in the thread and never changes; `rev_seq` is its position in the conversation's revision journal and is re-allocated on every edit/delete — realtime replay anchors on rev_seq, sorting anchors on seq.",
   "type": "object",
-  "required": ["message_id", "conversation_id", "seq", "rev_seq", "kind", "created_at"],
+  "required": [
+    "message_id",
+    "conversation_id",
+    "seq",
+    "rev_seq",
+    "kind",
+    "created_at"
+  ],
   "properties": {
-    "message_id":        { "type": "string", "format": "uuid" },
-    "conversation_id":   { "type": "string", "format": "uuid" },
-    "conversation_kind": { "type": "string", "enum": ["direct", "group", "support"] },
-    "scope_key":         { "type": "string" },
-    "sender_id":         { "type": ["string", "null"] },
-    "seq":               { "type": "integer", "minimum": 1 },
-    "rev_seq":           { "type": "integer", "minimum": 1 },
-    "kind":              { "type": "string", "enum": ["text", "system"] },
-    "body":              { "type": "string" },
-    "reply_to":          { "type": ["string", "null"] },
-    "client_msg_id":     { "type": ["string", "null"] },
-    "edited":            { "type": "boolean" },
-    "edited_at":         { "type": ["string", "null"], "format": "date-time" },
-    "deleted":           { "type": "boolean" },
-    "deleted_at":        { "type": ["string", "null"], "format": "date-time" },
+    "message_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conversation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conversation_kind": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "group",
+        "support"
+      ]
+    },
+    "scope_key": {
+      "type": "string"
+    },
+    "sender_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rev_seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "system"
+      ]
+    },
+    "body": {
+      "type": "string"
+    },
+    "reply_to": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "client_msg_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "edited_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "deleted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
     "attachments": {
       "type": "array",
-      "description": "Render descriptors. `type` is an OPEN registry (image/gif/video/voice/file out of the box, plus whatever the host registered), not a closed enum.",
+      "description": "Render descriptors. `type` is an OPEN registry sharing one vocabulary with stapel-cdn's media kinds, not a closed enum.",
       "items": {
         "type": "object",
-        "required": ["key", "type"],
+        "required": [
+          "key",
+          "type"
+        ],
         "properties": {
-          "key":          { "type": "string", "description": "Opaque CDN ref, <type>/<hash>" },
-          "type":         { "type": "string" },
-          "mime":         { "type": ["string", "null"] },
-          "bytes":        { "type": ["integer", "null"] },
-          "name":         { "type": ["string", "null"] },
-          "ext":          { "type": ["string", "null"] },
-          "width":        { "type": ["integer", "null"] },
-          "height":       { "type": ["integer", "null"] },
-          "aspect":       { "type": ["number", "null"] },
-          "duration_ms":  { "type": ["integer", "null"] },
-          "preview_b64":  { "type": ["string", "null"], "description": "~16px webp micro-thumbnail (or video poster) as a data: URI" },
-          "waveform_b64": { "type": ["string", "null"], "description": "Voice-message waveform image as a data: URI" },
-          "variants":     { "type": ["array", "null"], "items": { "type": "object" } }
+          "key": {
+            "type": "string",
+            "description": "Opaque CDN ref, <type>/<hash>"
+          },
+          "type": {
+            "type": "string",
+            "description": "Attachment type — an OPEN registry, and the same vocabulary as stapel-cdn's media kinds (image/gif/video/audio/file out of the box, plus whatever the host registered in both)."
+          },
+          "mime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ext": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "aspect": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Playback length. null means UNMEASURED, never zero — a zero-length voice message and an unmeasured one are different facts."
+          },
+          "preview_b64": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inline placeholder as a data:image/webp;base64,... URI, bounded by the CDN's byte budget."
+          },
+          "variants": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            }
+          },
+          "square": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "animated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "preview_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What preview_b64 depicts: blur | poster | waveform | null. A separate field on purpose — it follows from `type`, so it is known BEFORE any preview exists and a client can reserve the right-shaped placeholder immediately."
+          },
+          "poster_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A video's full poster, present only once it actually exists — never derived from the hash."
+          },
+          "meta_status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "partial",
+              "missing"
+            ]
+          },
+          "meta_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Named reason whenever meta_status is not ok (ffmpeg_missing, not_generated, preview_over_budget, unknown_ref, ...). A degraded attachment stays renderable."
+          }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "description": "Render descriptors from stapel-cdn's `cdn.describe_many`, denormalized once at send time. Field names are the CDN's."
       }
     },
-    "created_at":        { "type": "string", "format": "date-time" }
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
   },
   "additionalProperties": true
 }

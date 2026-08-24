@@ -63,7 +63,7 @@ pip install 'stapel-chat[realtime]'
   purge. An id that stops arriving is an id nobody can purge. Retention is
   permanent.
 - **Attachments that render on first paint** — aspect, byte size and a ~16px
-  base64 thumbnail for images and GIFs; duration and a waveform image for voice;
+  base64 thumbnail for images and GIFs; duration and a waveform image for audio;
   mime and extension for documents; poster and duration for video. The type set
   is an **open registry** — stickers are a settings line — and the metadata comes
   from `stapel-cdn` by comm, once, at send time.
@@ -87,7 +87,7 @@ pip install 'stapel-chat[realtime]'
 | `CHAT_KINDS` | `["direct","group","support"]` | Enabled thread kinds |
 | `ATTACHMENTS` | `True` | Allow attachments on messages |
 | `MAX_BODY_LENGTH` | `4000` | Hard cap on a text body |
-| `ATTACHMENT_TYPES` | `{}` | Open registry, merged over `image/gif/video/voice/file` |
+| `ATTACHMENT_TYPES` | `{}` | Open registry, merged over `image/gif/video/audio/file` — the same names stapel-cdn uses |
 | `ACTIVITY_STATES` | `{}` | Open registry, merged over `typing/recording_audio/…` |
 | `ATTACHMENT_METADATA` | `"cdn"` | Ask `cdn.describe`, or trust the client |
 | `MAX_ATTACHMENTS` | `10` | Attachments per message |

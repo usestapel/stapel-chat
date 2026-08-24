@@ -50,10 +50,13 @@ refreshes on a timer — see *Why there is no realtime switch* below.
 - **Attachments that render on first paint** — an opaque CDN `key` plus the
   metadata a bubble needs without a second round trip and without reflow:
   `aspect` / `bytes` / `preview_b64` (a ~16px webp data URI) for images and
-  GIFs; those plus `duration_ms` and a poster for video; `duration_ms` and
-  `waveform_b64` (a waveform **image**) for voice; `mime` / `ext` / `name` for
-  documents. The type set is an **open registry** (below). The metadata itself
-  comes from `stapel-cdn` by comm, once, at send time — never re-derived here.
+  GIFs; those plus `duration_ms` and a poster for video; `duration_ms` and a
+  waveform **image** for audio; `mime` / `ext` / `name` for documents. Plus
+  `preview_kind`, so the placeholder's shape is known before the preview
+  exists, and `meta_status` / `meta_reason`, so a degraded attachment stays
+  renderable and says why. The type set is an **open registry** sharing one
+  vocabulary with stapel-cdn (below), and the metadata comes from it by comm,
+  one call per message — never re-derived here.
 - **Direct idempotency** — a direct thread is keyed by an order-independent
   `direct_key` over the participant pair (namespaced by scope), uniquely
   constrained among direct threads. Get-or-create; the create race is resolved
@@ -177,20 +180,26 @@ create/operate/carry (enforced in the views), they never unmount an endpoint.
 
 Builtins <- `STAPEL_CHAT["ATTACHMENT_TYPES"]` <- `register_attachment_type()`,
 later wins, `None` removes — the same idiom as every other Stapel registry.
-Builtins: `image`, `gif`, `video`, `voice`, `file`. Each entry declares
-`fields` (what a UI may expect populated for the type — a rendering contract,
-not a validation rule, because the CDN generates thumbnails asynchronously and
-an image whose thumbnail is not ready yet must still be sendable) and `media`
-(whether the ref resolves to a CDN asset worth describing).
+Builtins: `image`, `gif`, `video`, `audio`, `file` — **the same names as
+stapel-cdn's `BUILTIN_MEDIA_KINDS`**, because they name the same thing. Each
+entry declares `fields` (what a UI may expect populated for the type — a
+rendering contract, not a validation rule, because the CDN generates previews
+asynchronously and an image whose preview is not ready yet must still be
+sendable), `preview_kind` (what this type's `preview_b64` will depict, known
+from the type alone) and `media` (whether the ref resolves to a CDN asset worth
+describing).
 
 Stickers are the named next type. Adding one is:
 
 ```python
 STAPEL_CHAT = {"ATTACHMENT_TYPES": {
     "sticker": {"fields": ("mime", "bytes", "width", "height", "pack_id"),
-                "media": True},
+                "preview_kind": "blur", "media": True},
 }}
 ```
+
+…paired with the same literal in `STAPEL_CDN["MEDIA_KINDS"]`, so the two
+registries stay one vocabulary.
 
 An **unregistered** type is refused (400 / `error.400.chat_unknown_attachment_type`).
 An open registry is not a free-for-all: the point of registering a type is that
@@ -205,32 +214,58 @@ Same merge semantics. Builtins: `idle`, `typing`, `recording_audio`,
 hint — there is no "stop typing" obligation, because a state that expires on its
 own is the only design that survives a tab closed mid-word.
 
-### 6. The CDN contract — what chat asks for and does not build
+### 6. The CDN contract — consumed, never reimplemented
 
-Chat calls **`cdn.describe`** (`stapel_core.comm.call`, never an import) once
-per attachment at send time and merges the answer *over* the client's fields.
-The keys it consumes:
+stapel-cdn **0.16.0** owns every number on an attachment. Chat calls
+**`cdn.describe_many`** (`stapel_core.comm.call`, never an import) once per
+message and merges the answer over what the client sent. Nothing here
+re-derives a preview, an aspect or a duration — that is the CDN's job, and a
+second implementation would be a second answer to "how big is this picture".
+
+**One vocabulary.** Chat's attachment `type` names *are* the CDN's media
+`kind` names — `image`, `gif`, `video`, `audio`, `file`, plus whatever a host
+registers in both. Two tests assert the two registries stay equal (names, and
+each type's `preview_kind` vs the CDN's `preview`); they exist because the two
+briefly drifted (`voice` here, `audio` there) and agreeing by comment is how a
+seam rots.
 
 | Key | Used for |
 |---|---|
-| `mime`, `bytes` | every type |
-| `width`, `height`, `aspect` | image / gif / video — `aspect` is what reserves the box before the asset lands, i.e. what stops the list reflowing |
-| `preview_b64` | the ~16px webp micro-thumbnail as a `data:` URI; **the video poster frame uses the same slot** |
-| `duration_ms` | voice, video |
-| `waveform_b64` | voice — a waveform **image** as a `data:` URI, so the client paints one `<img>` rather than running a canvas loop |
+| `mime`, `ext`, `bytes` | every type |
+| `width`, `height`, `aspect`, `square` | image / gif / video — `aspect` reserves the box before the asset lands, i.e. stops the reflow |
+| `animated` | whether to offer a play affordance instead of drawing a still |
+| `preview_b64` | the inline placeholder, a `data:image/webp;base64,…` URI |
+| `preview_kind` | what it depicts: `blur` / `poster` / `waveform` / `null` |
+| `poster_url` | a video's full poster — only once it exists, never derived from the hash |
+| `duration_ms` | audio, video. **`null` = unmeasured, never `0`** |
+| `meta_status`, `meta_reason` | `ok` / `partial` / `missing`, and *why* |
 | `variants[]` | `{tier, branch, url, width, height}` for a responsive `srcset` |
 
-`mime`, `bytes`, `width`, `height`, `aspect`, `duration_ms`, `preview_b64` and
-`variants` ship in `cdn.describe` today. **`waveform_b64` and a video
-`preview_b64` are the two chat needs and the CDN does not yet produce** — chat
-reads them when they appear and falls back to whatever the client supplied
-until then. Generation belongs in `stapel-cdn`; a second implementation here
-would be a second answer to "how big is this picture".
+**The preview is a pair.** `preview_kind` follows from the *type*, so it is
+known before any preview exists — a client reserves a waveform-shaped box for a
+voice note whose waveform is still rendering. Collapsing the pair into one
+nullable field destroys exactly the property the whole contract is for. A
+client does not get to assert it; the registry decides it.
 
-Failure is open by design: an unknown ref, an unreachable CDN or an unwired comm
-transport leaves the client's values in place and logs. A chat message must not
-fail to send because a metadata provider blinked; the worst case is a bubble
-rendered from the sender's own numbers.
+**Batching.** `cdn.describe_many` takes at most **50 refs per call** — each
+snapshot may inline a preview, so batch size *is* response size. Chat pages at
+that limit (`attachments.DESCRIBE_BATCH_LIMIT`, mirrored rather than imported:
+cross-module is comm by string name).
+
+**Degradation is data, at three levels.** An unreachable CDN or unwired comm
+transport leaves the client's fields in place and logs — a message must never
+fail to send because a metadata provider blinked. A ref the CDN *can* answer
+about but does not know comes back in its `missing` list and becomes
+`meta_status: "missing"`, `meta_reason: "unknown_ref"` on that one attachment,
+so a message with one dead attachment still renders the other nine. And an
+asset whose preview is not generated yet arrives `partial` with a named reason.
+There is no path that returns an unexplained null.
+
+**Budget.** Previews are capped at 4096 bytes on the finished data URI, by the
+CDN (downgrade-then-refuse, never truncation — a truncated base64 string is a
+broken image in every consumer) and again here by `MAX_PREVIEW_B64_BYTES`,
+which matches it deliberately. `MAX_ATTACHMENTS` × that is the per-message
+preview weight a client pays for.
 
 ### Events (comm surface)
 
@@ -320,11 +355,14 @@ an `error` frame.
   "body": "…", "reply_to": "uuid|null",
   "attachments": [{
     "key": "product/<hash>", "type": "image",
-    "mime": "image/webp", "bytes": 91234, "name": null, "ext": null,
+    "mime": "image/webp", "ext": "webp", "bytes": 91234, "name": null,
     "width": 1200, "height": 800, "aspect": 1.5,
+    "square": false, "animated": false,
     "duration_ms": null,
     "preview_b64": "data:image/webp;base64,…",
-    "waveform_b64": null,
+    "preview_kind": "blur",
+    "poster_url": null,
+    "meta_status": "ok", "meta_reason": null,
     "variants": [{"tier": 240, "branch": "w", "url": "…", "width": 240, "height": 160}]
   }],
   "client_msg_id": "c-7|null",

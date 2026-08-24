@@ -31,26 +31,48 @@ class AttachmentResponse:
     Every field is present on every attachment, ``null`` where it does not
     apply or the CDN has not produced it yet; which of them a given ``type``
     is expected to populate is declared by the attachment-type registry
-    (:mod:`stapel_chat.attachments`), which is open — ``sticker`` is a
-    settings line, not a release.
+    (:mod:`stapel_chat.attachments`), which is open — a sticker is a settings
+    line, not a release.
+
+    The names are **stapel-cdn's** (`cdn.describe`), because they name the
+    same things and two vocabularies for one thing is how a seam rots.
 
     Attributes:
         key: Opaque CDN ref (``<type>/<hash>``). The only field this module
             stores by itself; the bytes are never here.
-        type: Registry type — ``image`` / ``gif`` / ``video`` / ``voice`` /
-            ``file`` out of the box, plus whatever the host registered.
+        type: Registry type, and the CDN's media ``kind``: ``image`` / ``gif``
+            / ``video`` / ``audio`` / ``file`` out of the box, plus whatever
+            the host registered in both.
         mime: Content type.
         bytes: Byte size of the original.
         name: Original filename (documents).
-        ext: Lowercase extension without the dot (documents).
+        ext: Lowercase extension (documents).
         width: Pixel width (image/gif/video).
         height: Pixel height (image/gif/video).
         aspect: ``width / height`` — the number that reserves the box before
             the image arrives, which is what stops the list jumping.
-        duration_ms: Playback length (voice/video).
-        preview_b64: ~16px webp micro-thumbnail as a ``data:`` URI — the
-            blur-up placeholder, and the poster frame for a video.
-        waveform_b64: Waveform image as a ``data:`` URI (voice).
+        square: Whether the asset is square within a pixel.
+        animated: Whether it moves, so a UI offers a play affordance rather
+            than treating it as a still.
+        duration_ms: Playback length (audio/video). ``null`` means
+            **unmeasured**, never zero — a zero-length voice message and an
+            unmeasured one are different facts.
+        preview_b64: The inline placeholder as a ``data:image/webp;base64,…``
+            URI, bounded by the CDN's byte budget.
+        preview_kind: What ``preview_b64`` depicts — ``blur`` (a 16px LQIP),
+            ``poster`` (a video frame), ``waveform`` (a voice amplitude
+            strip), or ``null`` (a document: nothing but an icon). It is a
+            **separate field on purpose**: it follows from ``type``, so it is
+            known before any preview exists and a client can reserve the
+            right-shaped placeholder immediately.
+        poster_url: A video's full poster image, present only once the poster
+            actually exists — never derived from the hash.
+        meta_status: ``ok`` / ``partial`` / ``missing``.
+        meta_reason: Why, whenever the status is not ``ok``
+            (``ffmpeg_missing``, ``not_generated``, ``preview_over_budget``,
+            ``unknown_ref``, …). A degraded attachment stays renderable: this
+            is what lets a client tell "still generating" from "this
+            deployment has no ffmpeg" and draw the right placeholder.
         variants: Per-tier CDN geometry ``[{tier, branch, url, width,
             height}]`` for a responsive ``srcset``.
     """
@@ -64,9 +86,14 @@ class AttachmentResponse:
     width: Optional[int] = None
     height: Optional[int] = None
     aspect: Optional[float] = None
+    square: Optional[bool] = None
+    animated: Optional[bool] = None
     duration_ms: Optional[int] = None
     preview_b64: Optional[str] = None
-    waveform_b64: Optional[str] = None
+    preview_kind: Optional[str] = None
+    poster_url: Optional[str] = None
+    meta_status: str = "missing"
+    meta_reason: Optional[str] = None
     variants: List[Dict[str, Any]] = field(default_factory=list)
 
 
