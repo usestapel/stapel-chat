@@ -166,6 +166,13 @@ class ConversationParticipant(models.Model):
     ``last_read_seq`` is the seq of the newest message this participant has
     read; unread for them is ``count(Message.seq > last_read_seq authored by
     someone else)``.
+
+    ``last_delivered_seq`` is the newest message their *client* acknowledged
+    receiving. Delivered and read are two different facts — a phone with the
+    app in the background has the message, and nobody has looked at it — and a
+    UI that draws one tick and two ticks needs both. Both markers only ever
+    move forward, and both are readable over REST, which is what lets the
+    live receipt travel as an ephemeral Signal instead of a durable event.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -181,6 +188,7 @@ class ConversationParticipant(models.Model):
         max_length=16, choices=ParticipantRole.choices, default=ParticipantRole.MEMBER
     )
     last_read_seq = models.PositiveBigIntegerField(default=0)
+    last_delivered_seq = models.PositiveBigIntegerField(default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -205,8 +213,36 @@ class Message(models.Model):
     ``seq`` is the per-conversation monotonic order key (see
     :class:`Conversation`). ``sender`` is null for ``system`` messages.
     ``reply_to`` quotes an earlier message (nulled if that message is later
-    erased). ``attachments`` is a list of opaque string keys pointing at the
-    host's file storage — the module stores keys only, never bytes.
+    erased). ``attachments`` is a list of render descriptors, each carrying an
+    opaque CDN ``key`` plus the metadata a bubble needs to paint without a
+    second round trip — the module stores descriptors only, never bytes (see
+    :mod:`stapel_chat.attachments`).
+
+    Two sequences, and confusing them is the bug this docstring exists to
+    prevent:
+
+    * ``seq`` — the message's **position in the thread**. Allocated once, at
+      creation, and never touched again. History pagination anchors on it and
+      a client sorts by it.
+    * ``rev_seq`` — the message's position in the conversation's **journal of
+      revisions**. It starts equal to ``seq`` and is re-allocated (to a fresh
+      ``last_seq + 1``) every time the row changes: an edit, a delete. It is
+      the resume cursor: a socket replaying ``rev_seq > last_seq`` receives
+      every message whose *content* the client has not seen, including one
+      posted long ago and edited a minute back. Without it, an edit made while
+      a client was offline would be invisible forever — the row would carry a
+      seq the client had already acknowledged.
+
+    A client therefore **upserts by ``id``, orders by ``seq``**, and treats the
+    frame's own sequence purely as a cursor.
+
+    **Deletion is a tombstone, never a removal.** ``deleted_at`` is stamped,
+    ``body`` is emptied and ``attachments`` is cleared, and the row keeps being
+    delivered — with a fresh ``rev_seq`` — precisely so that every client cache
+    and offline database learns which id to purge. A row that simply vanished
+    would leave the copy on the client forever, which is the opposite of what
+    a delete is for. Retention: **permanent**. See MODULE.md for why there is
+    no TTL.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -221,6 +257,9 @@ class Message(models.Model):
         related_name="chat_messages",
     )
     seq = models.PositiveBigIntegerField()
+    # Journal position of the newest revision of this row (== seq until the
+    # first edit/delete). The resume cursor — see the class docstring.
+    rev_seq = models.PositiveBigIntegerField(default=0, db_index=True)
     kind = models.CharField(
         max_length=16, choices=MessageKind.choices, default=MessageKind.TEXT
     )
@@ -232,8 +271,23 @@ class Message(models.Model):
         on_delete=models.SET_NULL,
         related_name="replies",
     )
-    # Opaque attachment keys (e.g. "chat/<hash>") — files live in the host CDN.
+    # Render descriptors: [{key, type, mime, bytes, aspect, preview_b64, ...}].
+    # Files live in the host CDN; this module never sees bytes.
     attachments = models.JSONField(default=list, blank=True)
+
+    # Sender-generated idempotency key. A send retried over a socket that
+    # dropped mid-flight must not post the message twice — the client keeps
+    # the same id and the second attempt returns the first row. It also lets
+    # the sender reconcile its optimistic bubble with the frame that comes
+    # back, which is what makes Enter-to-send feel instant without any
+    # server-side draft concept.
+    client_msg_id = models.CharField(max_length=64, blank=True, default="")
+
+    # Presence is the flag. `edited_at` null == never edited; `deleted_at`
+    # null == live. Two timestamps rather than two booleans + two timestamps:
+    # a boolean that can disagree with its timestamp is a bug waiting.
+    edited_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -243,10 +297,30 @@ class Message(models.Model):
             models.UniqueConstraint(
                 fields=["conversation", "seq"], name="chat_message_uniq_seq"
             ),
+            # Idempotent send. Partial so the blank default (system lines, a
+            # client that sends none) never collides.
+            models.UniqueConstraint(
+                fields=["conversation", "client_msg_id"],
+                condition=~models.Q(client_msg_id=""),
+                name="chat_message_uniq_client_id",
+            ),
         ]
         indexes = [
             models.Index(fields=["conversation", "seq"], name="chat_message_conv_seq"),
+            # The replay query: rev_seq > cursor within one conversation.
+            models.Index(
+                fields=["conversation", "rev_seq"], name="chat_message_conv_rev"
+            ),
         ]
 
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
+
+    @property
+    def is_edited(self) -> bool:
+        return self.edited_at is not None
+
     def __str__(self):
-        return f"{self.conversation_id}#{self.seq} ({self.kind})"
+        state = " [deleted]" if self.deleted_at else ""
+        return f"{self.conversation_id}#{self.seq} ({self.kind}){state}"

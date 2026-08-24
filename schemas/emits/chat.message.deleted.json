@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "chat.message.deleted",
+  "description": "A message became a TOMBSTONE. The row is not removed: it keeps its id, its seq and its place in the order, loses its body and attachments, and goes out again under a fresh rev_seq — precisely so that every client cache and offline database learns which id to purge. A row that simply vanished would leave those copies in place forever. Retention of the tombstone is PERMANENT (see stapel-chat MODULE.md).",
+  "type": "object",
+  "required": [
+    "message_id",
+    "conversation_id",
+    "seq",
+    "rev_seq",
+    "deleted_at"
+  ],
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conversation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conversation_kind": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "group",
+        "support"
+      ]
+    },
+    "scope_key": {
+      "type": "string"
+    },
+    "sender_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rev_seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "deleted_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": true
+}

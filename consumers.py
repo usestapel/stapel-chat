@@ -1,34 +1,42 @@
-"""ChatConsumer — the WebSocket transport for conversation delivery.
+"""The two chat sockets. Realtime is the path, not an option on it.
 
-Store-first, transport-thin (the studio-chat §2.4 discipline, an independent
-generic implementation): the socket never owns state. New messages are written
-by the service layer (REST or the ``send`` frame below), whose ``on_commit``
-fan-out relays the committed row to the Channels group; the socket only carries
-the durable, ``seq``-ordered journal, so a dropped socket loses nothing.
+Until 0.3.0 this file was chat's *own* WebSocket implementation — its own
+frame shapes, its own close codes, its own resume loop. ``stapel-realtime``
+generalized exactly that protocol into a substrate, and its module map names
+chat as one of the three duplicate implementations it exists to end. So this
+file no longer implements a socket; it implements the two hooks a resumable
+stream needs, plus the frames chat adds on top.
 
-Correctness never depends on live delivery:
+Two consumers, one per stream (:mod:`stapel_chat.realtime`):
 
-* **Ordered by seq + idempotent.** Every outgoing frame carries the monotonic
-  per-conversation ``seq``; the consumer drops any frame whose ``seq`` it has
-  already sent, so the replay-then-live overlap after a resume never
-  double-delivers.
-* **Reconnect by last_seq.** ``hello{last_seq}`` replays ``Message.seq >
-  last_seq`` from the database, then ``replay_done``. A gap wider than the
-  replay window answers ``error{code=resync}`` so the client re-hydrates via
-  the REST history endpoint.
+* :class:`ChatConsumer` — ``chat:conv:<id>``. Resumable, and the canonical
+  place a message is both sent and received. Replay is anchored on
+  ``rev_seq``, so an edit or a delete that happened while the client was away
+  arrives in the catch-up like any other change.
+* :class:`ChatInboxConsumer` — ``chat:user:<id>``. Ephemeral. It exists
+  because a conversation *list* that has no socket is a conversation list
+  that polls, and a chat which polls its inbox is a polling chat however live
+  the open thread is.
 
-Protocol
---------
-client → server:  ``hello{last_seq}`` / ``send{body,attachments,reply_to}`` /
-                  ``ack{seq}`` / ``ping``
-server → client:  ``welcome{server_seq}`` / ``message{…seq}`` /
-                  ``replay_done{up_to_seq}`` / ``error{code,message}`` / ``pong``
+**Frame sequence is not message sequence.** The envelope's ``seq`` is the
+journal cursor (``rev_seq``); the payload's ``seq`` is the message's position
+in the thread. A client upserts by ``message_id``, orders by the payload's
+``seq``, and remembers the envelope's ``seq`` as its resume cursor. Getting
+this backwards makes edits reorder the thread.
 
-Channels is an optional extra. Importing this module without it raises a clear
-ImportError; it is never imported at app-ready time (the package works
-HTTP-only). Wire it in the host's ``asgi.py`` behind
-``stapel_core.django.jwt.channels.JWTAuthMiddlewareStack`` so
-``scope["user"]`` is populated.
+Writes over the socket
+----------------------
+The substrate's default posture is that writes go over REST. Chat is the
+documented exception and it is a deliberate one: the owner's ruling is that a
+chat client gets a full WebSocket, and a compose box whose Enter key takes a
+different transport than the messages it produces is the seam where "realtime
+was built" stops being true. Every write frame here goes through the same
+service layer the REST view calls — one validation path, one emit, one
+fan-out — and carries a ``client_msg_id`` so a retry after a dropped socket
+is idempotent rather than a duplicate bubble.
+
+Channels is an optional extra of ``stapel-realtime``. Importing this module
+without it raises a clear ImportError; it is never imported at app-ready time.
 """
 from __future__ import annotations
 
@@ -36,22 +44,50 @@ import logging
 
 try:
     from channels.db import database_sync_to_async
-    from channels.generic.websocket import AsyncJsonWebsocketConsumer
 except ImportError as exc:  # pragma: no cover - exercised via optional-dep test
     raise ImportError(
         "stapel_chat.consumers requires the optional 'channels' dependency. "
-        "Install it with:\n    pip install 'stapel-chat[channels]'"
+        "Install it with:\n    pip install 'stapel-chat[realtime]'"
     ) from exc
+
+from stapel_realtime import envelope as wire
+from stapel_realtime.consumers import (
+    EphemeralStreamConsumer,
+    JournalRow,
+    ResumableStreamConsumer,
+)
+
+from .realtime import conversation_stream, message_payload, user_stream
 
 logger = logging.getLogger(__name__)
 
-#: Widest resume gap replayed inline before the client is told to re-hydrate via
-#: the REST history endpoint.
-REPLAY_LIMIT = 500
+# ── client → server frame types chat adds to the substrate's three ───────
+
+SEND = "send"
+EDIT = "edit"
+DELETE = "delete"
+READ = "read"
+DELIVERED = "delivered"
+ACTIVITY = "activity"
+
+#: ``error`` codes this module emits, on top of the substrate's.
+ERROR_EMPTY = "empty"
+ERROR_TOO_LONG = "too_long"
+ERROR_ATTACHMENTS_DISABLED = "attachments_disabled"
+ERROR_INVALID_ATTACHMENT = "invalid_attachment"
+ERROR_UNKNOWN_ATTACHMENT_TYPE = "unknown_attachment_type"
+ERROR_INVALID_REPLY = "invalid_reply"
+ERROR_NOT_FOUND = "not_found"
+ERROR_NOT_AUTHOR = "not_author"
+ERROR_NOT_EDITABLE = "not_editable"
+ERROR_DELETED = "deleted"
+ERROR_UNKNOWN_ACTIVITY = "unknown_activity"
 
 
-def _authorize_sync(conversation_id: str, user_id) -> bool:
-    """A user may subscribe iff they are a participant of the conversation."""
+# ── sync helpers (each runs in a thread) ────────────────────────────────
+
+
+def _is_participant(conversation_id, user_id) -> bool:
     from django.core.exceptions import ValidationError
 
     from .models import ConversationParticipant
@@ -64,169 +100,296 @@ def _authorize_sync(conversation_id: str, user_id) -> bool:
         return False
 
 
-def _server_seq_sync(conversation_id: str) -> int:
+def _server_seq(conversation_id) -> int:
     from .models import Conversation
 
-    conv = Conversation.objects.filter(pk=conversation_id).values("last_seq").first()
-    return conv["last_seq"] if conv else 0
+    row = Conversation.objects.filter(pk=conversation_id).values("last_seq").first()
+    return row["last_seq"] if row else 0
 
 
-def _replay_rows_sync(conversation_id: str, after_seq: int, limit: int) -> list:
-    from .models import Message
-    from .realtime import message_frame
+def _replay(conversation_id, after_seq: int, limit: int) -> list:
+    from . import services
 
-    rows = (
-        Message.objects.filter(conversation_id=conversation_id, seq__gt=after_seq)
-        .select_related("conversation")
-        .order_by("seq")[:limit]
-    )
-    return [message_frame(m, m.conversation) for m in rows]
+    return [
+        JournalRow(seq=m.rev_seq, payload=message_payload(m, m.conversation))
+        for m in services.journal_rows(
+            conversation_id=conversation_id, after_seq=after_seq, limit=limit
+        )
+    ]
 
 
-def _send_message_sync(conversation_id: str, user_id, content: dict) -> dict | None:
-    """Persist an inbound ``send`` frame via the service layer. Returns an error
-    dict on refusal, else None (the fan-out delivers the message frame)."""
+def _conversation_and_user(conversation_id, user_id):
     from django.contrib.auth import get_user_model
 
-    from . import services
-    from .conf import chat_settings
-    from .models import Conversation, Message, MessageKind
-
-    body = (content.get("body") or "").strip()
-    attachments = content.get("attachments") or []
-    if not body and not attachments:
-        return {"code": "empty", "message": "message needs a body or an attachment"}
-    if attachments and not chat_settings.ATTACHMENTS:
-        return {"code": "attachments_disabled", "message": "attachments are disabled"}
-    if len(body) > chat_settings.MAX_BODY_LENGTH:
-        return {"code": "too_long", "message": "message body too long"}
+    from .models import Conversation
 
     conv = Conversation.objects.filter(pk=conversation_id).first()
-    if conv is None:
-        return {"code": "not_found", "message": "conversation not found"}
-    User = get_user_model()
-    sender = User.objects.get(pk=user_id)
+    user = get_user_model().objects.filter(pk=user_id).first()
+    return conv, user
+
+
+def _do_send(conversation_id, user_id, payload: dict) -> dict | None:
+    """Persist an inbound ``send``. Returns an error dict, or None on success
+    (the on-commit fan-out delivers the frame to every subscriber, sender
+    included — there is no separate echo to keep in step)."""
+    from . import services
+    from .attachments import InvalidAttachment, UnknownAttachmentType
+    from .conf import chat_settings
+    from .models import Message, MessageKind
+
+    body = (payload.get("body") or "").strip()
+    attachments = payload.get("attachments") or []
+    if not body and not attachments:
+        return {"code": ERROR_EMPTY, "message": "message needs a body or an attachment"}
+    if attachments and not chat_settings.ATTACHMENTS:
+        return {
+            "code": ERROR_ATTACHMENTS_DISABLED,
+            "message": "attachments are disabled",
+        }
+    if len(body) > chat_settings.MAX_BODY_LENGTH:
+        return {"code": ERROR_TOO_LONG, "message": "message body too long"}
+
+    conv, sender = _conversation_and_user(conversation_id, user_id)
+    if conv is None or sender is None:
+        return {"code": ERROR_NOT_FOUND, "message": "conversation not found"}
+
     reply_to = None
-    reply_to_id = content.get("reply_to")
+    reply_to_id = payload.get("reply_to")
     if reply_to_id:
         reply_to = Message.objects.filter(
             pk=reply_to_id, conversation_id=conversation_id
         ).first()
         if reply_to is None:
-            return {"code": "invalid_reply", "message": "reply target not in thread"}
-    services.post_message(
-        conversation=conv, sender=sender, body=body,
-        attachments=list(attachments), reply_to=reply_to, kind=MessageKind.TEXT,
-    )
+            return {
+                "code": ERROR_INVALID_REPLY,
+                "message": "reply target not in thread",
+            }
+    try:
+        services.post_message(
+            conversation=conv,
+            sender=sender,
+            body=body,
+            attachments=list(attachments),
+            reply_to=reply_to,
+            kind=MessageKind.TEXT,
+            client_msg_id=str(payload.get("client_msg_id") or ""),
+        )
+    except UnknownAttachmentType as exc:
+        return {
+            "code": ERROR_UNKNOWN_ATTACHMENT_TYPE,
+            "message": f"unknown attachment type {exc}",
+        }
+    except InvalidAttachment as exc:
+        return {"code": ERROR_INVALID_ATTACHMENT, "message": str(exc)}
     return None
 
 
-class ChatConsumer(AsyncJsonWebsocketConsumer):
-    """One socket ↔ one conversation group. Auth on connect, protocol in receive."""
+def _do_edit(conversation_id, user_id, payload: dict) -> dict | None:
+    from . import services
+    from .conf import chat_settings
+    from .models import Message
 
-    async def connect(self):
-        self.conversation_id = str(
-            self.scope["url_route"]["kwargs"]["conversation_id"]
+    body = (payload.get("body") or "").strip()
+    if not body:
+        return {"code": ERROR_EMPTY, "message": "an edited message needs a body"}
+    if len(body) > chat_settings.MAX_BODY_LENGTH:
+        return {"code": ERROR_TOO_LONG, "message": "message body too long"}
+    msg = Message.objects.filter(
+        pk=payload.get("message_id"), conversation_id=conversation_id
+    ).first()
+    if msg is None:
+        return {"code": ERROR_NOT_FOUND, "message": "message not found"}
+    _, editor = _conversation_and_user(conversation_id, user_id)
+    try:
+        services.edit_message(message=msg, editor=editor, body=body)
+    except services.NotAuthor:
+        return {"code": ERROR_NOT_AUTHOR, "message": "only the author may edit"}
+    except services.MessageGone:
+        return {"code": ERROR_DELETED, "message": "this message has been deleted"}
+    except services.NotEditable as exc:
+        return {"code": ERROR_NOT_EDITABLE, "message": str(exc)}
+    return None
+
+
+def _do_delete(conversation_id, user_id, payload: dict) -> dict | None:
+    from . import services
+    from .models import Message
+
+    msg = Message.objects.filter(
+        pk=payload.get("message_id"), conversation_id=conversation_id
+    ).first()
+    if msg is None:
+        return {"code": ERROR_NOT_FOUND, "message": "message not found"}
+    _, actor = _conversation_and_user(conversation_id, user_id)
+    try:
+        services.delete_message(message=msg, actor=actor)
+    except services.NotAuthor:
+        return {"code": ERROR_NOT_AUTHOR, "message": "only the author may delete"}
+    return None
+
+
+def _do_marker(conversation_id, user_id, payload: dict, *, read: bool) -> dict | None:
+    from . import services
+
+    try:
+        upto = max(0, int(payload.get("upto_seq") or 0))
+    except (TypeError, ValueError):
+        return {"code": wire.ERROR_BAD_ENVELOPE, "message": "'upto_seq' must be an int"}
+    conv, user = _conversation_and_user(conversation_id, user_id)
+    if conv is None or user is None:
+        return {"code": ERROR_NOT_FOUND, "message": "conversation not found"}
+    if read:
+        services.mark_read(conversation=conv, user=user, upto_seq=upto)
+    else:
+        services.mark_delivered(conversation=conv, user=user, upto_seq=upto)
+    return None
+
+
+def _do_activity(conversation_id, user_id, payload: dict) -> dict | None:
+    from . import services
+    from .activity import UnknownActivityState
+
+    conv, user = _conversation_and_user(conversation_id, user_id)
+    if conv is None or user is None:
+        return {"code": ERROR_NOT_FOUND, "message": "conversation not found"}
+    try:
+        services.announce_activity(
+            conversation=conv, user=user, state=str(payload.get("state") or "")
         )
-        user = self.scope.get("user")
-        self.user_id = getattr(user, "id", None) or getattr(user, "pk", None)
-        self._max_seq_sent = 0
-        self.acked_seq = 0
-        if not self.user_id:
-            await self.close(code=4401)  # unauthenticated
-            return
-        allowed = await database_sync_to_async(_authorize_sync)(
-            self.conversation_id, self.user_id
+    except UnknownActivityState as exc:
+        return {
+            "code": ERROR_UNKNOWN_ACTIVITY,
+            "message": f"unknown activity state {exc}",
+        }
+    return None
+
+
+# ── consumers ────────────────────────────────────────────────────────────
+
+
+class ChatConsumer(ResumableStreamConsumer):
+    """One socket ↔ one conversation, resumable by ``rev_seq``.
+
+    The substrate owns authentication, the envelope, the heartbeat, backpressure
+    and revoke-to-kick. This class supplies the two journal hooks, the
+    participation gate, and chat's six write frames.
+    """
+
+    module = "chat"
+    scope_type = "conv"
+    stream_key_kwarg = "conversation_id"
+
+    async def get_stream_key(self) -> str:
+        kwargs = (self.scope.get("url_route") or {}).get("kwargs") or {}
+        self.conversation_id = str(kwargs["conversation_id"])
+        return conversation_stream(self.conversation_id)
+
+    async def authorize(self, scope, stream_key) -> bool:
+        """A user may watch a conversation iff they are a participant of it.
+
+        Not ``WorkspaceCapability``: a chat thread's read right is membership
+        of that thread, not a capability in a workspace — a support customer
+        typically holds no mandate anywhere and must still read their own
+        ticket.
+        """
+        user_id = self._user_id()
+        if user_id is None:
+            return False
+        return await database_sync_to_async(_is_participant)(
+            self.conversation_id, user_id
         )
-        if not allowed:
-            await self.close(code=4403)  # not a participant
-            return
-        self.group = _group_name(self.conversation_id)
-        await self.channel_layer.group_add(self.group, self.channel_name)
-        await self.accept()
 
-    async def disconnect(self, code):
-        if getattr(self, "group", None):
-            await self.channel_layer.group_discard(self.group, self.channel_name)
+    # ── journal hooks ────────────────────────────────────────────────────
 
-    # ── inbound (client → server) ────────────────────────────────────────
+    async def get_server_seq(self) -> int:
+        return await database_sync_to_async(_server_seq)(self.conversation_id)
 
-    async def receive_json(self, content, **kwargs):
-        handler = {
-            "hello": self._on_hello,
-            "send": self._on_send,
-            "ack": self._on_ack,
-            "ping": self._on_ping,
-        }.get(content.get("type"))
-        if handler is None:
-            await self._error("bad_type", f"unknown type {content.get('type')!r}")
-            return
-        await handler(content)
-
-    async def _on_hello(self, content):
-        last_seq = int(content.get("last_seq") or 0)
-        server_seq = await database_sync_to_async(_server_seq_sync)(
-            self.conversation_id
+    async def get_replay_rows(self, after_seq: int, limit: int):
+        return await database_sync_to_async(_replay)(
+            self.conversation_id, after_seq, limit
         )
-        await self.send_json(
+
+    # ── chat's write frames ──────────────────────────────────────────────
+
+    def frame_handlers(self):
+        handlers = super().frame_handlers()
+        handlers.update(
             {
-                "type": "welcome",
-                "conversation_id": self.conversation_id,
-                "server_seq": server_seq,
+                SEND: self.on_send,
+                EDIT: self.on_edit,
+                DELETE: self.on_delete,
+                READ: self.on_read,
+                DELIVERED: self.on_delivered,
+                ACTIVITY: self.on_activity,
             }
         )
-        # Advance our dedup cursor to what the client already has, so a
-        # concurrent live frame at last_seq is not re-sent.
-        self._max_seq_sent = max(self._max_seq_sent, last_seq)
-        if server_seq - last_seq > REPLAY_LIMIT:
-            await self._error(
-                "resync",
-                f"resume gap {server_seq - last_seq} exceeds window {REPLAY_LIMIT}",
-            )
-            return
-        rows = await database_sync_to_async(_replay_rows_sync)(
-            self.conversation_id, last_seq, REPLAY_LIMIT
-        )
-        for frame in rows:
-            await self._send_frame(frame)
-        await self.send_json({"type": "replay_done", "up_to_seq": server_seq})
+        return handlers
 
-    async def _on_send(self, content):
-        err = await database_sync_to_async(_send_message_sync)(
-            self.conversation_id, self.user_id, content
+    async def _run(self, func, frame):
+        err = await database_sync_to_async(func)(
+            self.conversation_id, self._user_id(), frame.payload
         )
         if err:
             await self._error(err["code"], err["message"])
-        # On success the on_commit fan-out delivers the message frame back to
-        # this socket (and every subscriber) — no direct echo.
 
-    async def _on_ack(self, content):
-        self.acked_seq = max(self.acked_seq, int(content.get("seq") or 0))
+    async def on_send(self, frame):
+        await self._run(_do_send, frame)
 
-    async def _on_ping(self, content):
-        await self.send_json({"type": "pong"})
+    async def on_edit(self, frame):
+        await self._run(_do_edit, frame)
 
-    # ── outbound (server → client) ───────────────────────────────────────
+    async def on_delete(self, frame):
+        await self._run(_do_delete, frame)
 
-    async def chat_frame(self, event):
-        """Channels group event → socket (seq-dedup lives in _send_frame)."""
-        await self._send_frame(event["frame"])
-
-    async def _send_frame(self, frame: dict):
-        seq = frame.get("seq")
-        if seq is not None and seq <= self._max_seq_sent:
-            return  # idempotent by seq — drop replays of what we already sent
-        await self.send_json(frame)
-        if seq is not None:
-            self._max_seq_sent = max(self._max_seq_sent, seq)
-
-    async def _error(self, code: str, message: str, **extra):
-        await self.send_json(
-            {"type": "error", "code": code, "message": message, **extra}
+    async def on_read(self, frame):
+        await self._run(
+            lambda c, u, p: _do_marker(c, u, p, read=True), frame
         )
 
+    async def on_delivered(self, frame):
+        await self._run(
+            lambda c, u, p: _do_marker(c, u, p, read=False), frame
+        )
 
-def _group_name(conversation_id: str) -> str:
-    from .realtime import group_name
+    async def on_activity(self, frame):
+        await self._run(_do_activity, frame)
 
-    return group_name(conversation_id)
+
+class ChatInboxConsumer(EphemeralStreamConsumer):
+    """One socket ↔ one user's inbox. Read-only, ephemeral.
+
+    Everything it carries — a new message in some thread, an unread count that
+    moved — is recoverable by listing conversations over REST, which is
+    exactly the substrate's condition for a fact being allowed to travel as a
+    Signal. It exists so that recovery is not the *normal* path: without it a
+    conversation list has no socket, and a list with no socket refreshes on a
+    timer forever no matter how live the open thread is.
+    """
+
+    module = "chat"
+    scope_type = "user"
+    stream_key_kwarg = "user_id"
+
+    async def get_stream_key(self) -> str:
+        return user_stream(self._user_id())
+
+    async def authorize(self, scope, stream_key) -> bool:
+        """You may watch exactly one inbox: your own.
+
+        The stream key is derived from the authenticated scope rather than
+        read from the URL, so there is no id to tamper with — the route
+        carries no user segment at all.
+        """
+        return self._user_id() is not None
+
+
+__all__ = [
+    "ACTIVITY",
+    "ChatConsumer",
+    "ChatInboxConsumer",
+    "DELETE",
+    "DELIVERED",
+    "EDIT",
+    "READ",
+    "SEND",
+]

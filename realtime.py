@@ -1,12 +1,39 @@
-"""Realtime fan-out helper (Channels-optional).
+"""Fan-out: the payloads chat puts on the wire, and where it puts them.
 
-The send path schedules :func:`broadcast_message` ``on_commit`` to push a new
-message to every subscriber of the conversation's Channels group. This is
-**best-effort**: if Channels is not installed, no channel layer is configured,
-or the layer send fails, delivery is simply skipped — correctness is preserved
-because a client recovers missed messages by replaying durable rows by ``seq``
-(see :mod:`stapel_chat.consumers`). Nothing here is imported at app-ready time,
-so an HTTP-only host never touches Channels.
+Chat had its own WebSocket implementation — its own frame shapes, its own
+close codes, its own resume protocol — written before the fleet had a
+substrate. ``stapel-realtime`` is that substrate now, and it says so in its
+own module map: *"the fleet had three independent implementations of the same
+socket — chat, video and studio-dialog"*. Since 0.3.0 chat is not one of them.
+Everything below either builds a payload or hands it to
+``stapel_realtime.delivery``; nothing here knows what a Channels group is.
+
+Two streams, and the difference between them is the difference between the
+two comm primitives underneath:
+
+``chat:conv:<conversation_id>`` — the **conversation journal**. Resumable:
+every frame carries the message's ``rev_seq``, and a client that was away
+replays from the durable rows. Delivery is :func:`deliver_frame`, always from
+``transaction.on_commit`` — store first, tell the socket second.
+
+``chat:user:<user_id>`` — the participant's **inbox**. Ephemeral: it exists so
+a conversation list is live without polling, and everything it carries is
+recoverable by re-listing conversations over REST. Delivery is
+``stapel_core.comm.signal``.
+
+Payload minimalism, the substrate's review-checklist item, is satisfied on
+both: the conversation stream's ``authorize()`` gate *is* participation in
+that conversation, and the inbox stream's gate is being that user — so a
+message body is admissible on either, because on both the gate equals the
+right to read the body. That is why the inbox can carry the last message
+instead of an id the client must go and fetch.
+
+Best-effort remains best-effort. No channel layer, no signal transport, redis
+down — nothing here raises, because correctness lives in the rows: a client
+recovers by replaying ``rev_seq``. What is *not* best-effort any more is the
+configuration: a deployment that cannot serve the socket fails
+``manage.py check`` (``stapel_chat.E010``-``E014``) rather than quietly
+becoming a polling product.
 """
 from __future__ import annotations
 
@@ -14,49 +41,175 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+#: Canonical stream-key module segment.
+STREAM_MODULE = "chat"
 
-def group_name(conversation_id) -> str:
-    """Channels group every subscriber of a conversation joins."""
-    return f"chat.conv.{conversation_id}"
+# ── signal types (never protocol frame types; the core enforces that) ─────
+
+#: A participant's read marker moved.
+SIGNAL_READ = "chat.read"
+#: A participant's delivery marker moved.
+SIGNAL_DELIVERED = "chat.delivered"
+#: A participant is typing / recording / uploading. See :mod:`activity`.
+SIGNAL_ACTIVITY = "chat.activity"
+#: Something happened in a conversation this user takes part in (inbox).
+SIGNAL_INBOX = "chat.inbox"
 
 
-def message_frame(msg, conv) -> dict:
-    """server→client ``message`` frame for a persisted message (carries ``seq``
-    so the consumer can dedup replays against live frames)."""
+def conversation_stream(conversation_id) -> str:
+    """``chat:conv:<id>`` — the resumable journal of one conversation."""
+    from stapel_core.comm import stream_key
+
+    return stream_key(STREAM_MODULE, "conv", str(conversation_id))
+
+
+def user_stream(user_id) -> str:
+    """``chat:user:<id>`` — one participant's ephemeral inbox stream."""
+    from stapel_core.comm import stream_key
+
+    return stream_key(STREAM_MODULE, "user", str(user_id))
+
+
+# ── payloads ─────────────────────────────────────────────────────────────
+
+
+def message_payload(msg, conv=None) -> dict:
+    """The one message shape, used by the journal frame, the ``chat.message``
+    Action and the REST serializer alike.
+
+    A deleted message keeps its ``id``, ``seq``, ``sender_id`` and
+    ``created_at`` and loses everything else: ``body`` is empty,
+    ``attachments`` is empty, ``deleted`` is true. That is the tombstone — the
+    id keeps arriving so a client cache knows exactly which row to purge.
+    """
+    conversation_id = conv.id if conv is not None else msg.conversation_id
+    deleted = msg.deleted_at is not None
     return {
-        "type": "message",
         "message_id": str(msg.id),
-        "conversation_id": str(conv.id),
+        "conversation_id": str(conversation_id),
         "sender_id": str(msg.sender_id) if msg.sender_id else None,
         "seq": msg.seq,
+        "rev_seq": msg.rev_seq,
         "kind": msg.kind,
-        "body": msg.body,
+        "body": "" if deleted else msg.body,
         "reply_to": str(msg.reply_to_id) if msg.reply_to_id else None,
-        "attachments": msg.attachments,
+        "attachments": [] if deleted else list(msg.attachments or []),
+        "client_msg_id": msg.client_msg_id or None,
+        "edited": msg.edited_at is not None,
+        "edited_at": msg.edited_at.isoformat() if msg.edited_at else None,
+        "deleted": deleted,
+        "deleted_at": msg.deleted_at.isoformat() if msg.deleted_at else None,
         "created_at": msg.created_at.isoformat(),
     }
 
 
-def _channel_layer():
+# ── delivery ─────────────────────────────────────────────────────────────
+
+
+def _deliver_frame(stream: str, payload: dict, seq: int) -> bool:
     try:
-        from channels.layers import get_channel_layer
-    except ImportError:
-        return None
-    return get_channel_layer()
+        from stapel_realtime.delivery import deliver_frame
+    except ImportError:  # pragma: no cover - exercised via optional-dep test
+        logger.debug("chat: stapel-realtime transport unavailable")
+        return False
+    return deliver_frame(stream, payload, seq=seq)
 
 
-def broadcast_message(msg, conv) -> None:
-    """Push ``msg`` to the conversation's group. Never raises — realtime is a
-    convenience over the durable, seq-replayable journal."""
-    layer = _channel_layer()
-    if layer is None:
-        return
+def _signal(stream: str, type_: str, payload: dict) -> None:
     try:
-        from asgiref.sync import async_to_sync
+        from stapel_core.comm import signal
 
-        async_to_sync(layer.group_send)(
-            group_name(conv.id),
-            {"type": "chat.frame", "frame": message_frame(msg, conv)},
+        signal(stream, type_, payload)
+    except Exception:  # pragma: no cover - a courtesy never breaks a caller
+        logger.debug("chat: signal %s skipped on %s", type_, stream, exc_info=True)
+
+
+def broadcast_message(msg, conv, participant_ids=()) -> None:
+    """Push a created/edited/deleted message to the conversation journal, then
+    nudge every participant's inbox.
+
+    Called from ``transaction.on_commit`` — the row that owns ``rev_seq`` is
+    already durable, so a subscriber that misses this replays it.
+    """
+    payload = message_payload(msg, conv)
+    _deliver_frame(conversation_stream(conv.id), payload, seq=msg.rev_seq)
+    for user_id in participant_ids:
+        _signal(
+            user_stream(user_id),
+            SIGNAL_INBOX,
+            {
+                "conversation_id": str(conv.id),
+                "conversation_kind": conv.kind,
+                "last_seq": conv.last_seq,
+                "message": payload,
+            },
         )
-    except Exception:  # pragma: no cover - best-effort delivery
-        logger.debug("chat realtime fan-out skipped", exc_info=True)
+
+
+def broadcast_read(conv, user_id, last_read_seq: int) -> None:
+    """A read receipt — ephemeral, because ``last_read_seq`` is on the
+    participant row and comes back with the conversation over REST."""
+    _signal(
+        conversation_stream(conv.id),
+        SIGNAL_READ,
+        {
+            "conversation_id": str(conv.id),
+            "user_id": str(user_id),
+            "last_read_seq": int(last_read_seq),
+        },
+    )
+
+
+def broadcast_delivered(conv, user_id, last_delivered_seq: int) -> None:
+    """A delivery receipt. Same reasoning as :func:`broadcast_read`."""
+    _signal(
+        conversation_stream(conv.id),
+        SIGNAL_DELIVERED,
+        {
+            "conversation_id": str(conv.id),
+            "user_id": str(user_id),
+            "last_delivered_seq": int(last_delivered_seq),
+        },
+    )
+
+
+def broadcast_activity(conversation_id, user_id, state: str, ttl_s: int) -> None:
+    """"typing…" and its siblings. Nothing is written; nothing is owed to
+    anyone who was not watching. ``ttl_s`` is the client's expiry hint, so no
+    "stopped typing" frame is required for the indicator to disappear."""
+    _signal(
+        conversation_stream(conversation_id),
+        SIGNAL_ACTIVITY,
+        {
+            "conversation_id": str(conversation_id),
+            "user_id": str(user_id),
+            "state": state,
+            "ttl_s": int(ttl_s),
+        },
+    )
+
+
+def revoke_participant(conversation_id, user_id, reason: str = "left_conversation") -> None:
+    """End an open subscription now, when membership ends mid-socket."""
+    try:
+        from stapel_realtime.delivery import revoke
+    except ImportError:  # pragma: no cover
+        return
+    revoke(conversation_stream(conversation_id), user_id, reason=reason)
+
+
+__all__ = [
+    "SIGNAL_ACTIVITY",
+    "SIGNAL_DELIVERED",
+    "SIGNAL_INBOX",
+    "SIGNAL_READ",
+    "STREAM_MODULE",
+    "broadcast_activity",
+    "broadcast_delivered",
+    "broadcast_message",
+    "broadcast_read",
+    "conversation_stream",
+    "message_payload",
+    "revoke_participant",
+    "user_stream",
+]

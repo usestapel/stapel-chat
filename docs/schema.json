@@ -146,6 +146,56 @@
         }
       }
     },
+    "/chat/api/v1/conversations/{conversation_id}/activity": {
+      "post": {
+        "operationId": "chat_api_v1_conversations_activity_create",
+        "description": "Announce \"typing…\" (or any registered activity) to the conversation.\n\nNothing is stored and nothing is returned but the resolved TTL. The\nendpoint exists for parity — a client whose socket is momentarily down can\nstill say it is typing — and it is explicitly *not* the intended path:\nan activity state is worth less than the round trip that carries it, which\nis why the socket's ``activity`` frame is the one a UI should use.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivityRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivityRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "No response body"
+          }
+        }
+      }
+    },
     "/chat/api/v1/conversations/{conversation_id}/messages": {
       "get": {
         "operationId": "chat_api_v1_conversations_messages_list",
@@ -270,10 +320,119 @@
         }
       }
     },
+    "/chat/api/v1/conversations/{conversation_id}/messages/{message_id}": {
+      "patch": {
+        "operationId": "chat_api_v1_conversations_messages_partial_update",
+        "description": "Edit or delete one message. Author only.\n\nThe HTTP twin of the socket's ``edit`` / ``delete`` frames — same service\ncalls, same emits, same fan-out. It exists so a client that has just\nrehydrated over REST is not obliged to open a socket to correct a typo,\nnot because REST is the intended path: the socket is.\n\n``DELETE`` leaves a **tombstone** and answers ``200`` with the stripped\nmessage, not ``204``. The body is the point — the caller (and every other\nsubscriber, over the socket) is handed the exact row shape that says \"this\nid is now empty\", which is what a local cache purges against.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchedEditMessageRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchedEditMessageRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchedEditMessageRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      },
+      "delete": {
+        "operationId": "chat_api_v1_conversations_messages_destroy",
+        "description": "Edit or delete one message. Author only.\n\nThe HTTP twin of the socket's ``edit`` / ``delete`` frames — same service\ncalls, same emits, same fan-out. It exists so a client that has just\nrehydrated over REST is not obliged to open a socket to correct a typo,\nnot because REST is the intended path: the socket is.\n\n``DELETE`` leaves a **tombstone** and answers ``200`` with the stripped\nmessage, not ``204``. The body is the point — the caller (and every other\nsubscriber, over the socket) is handed the exact row shape that says \"this\nid is now empty\", which is what a local cache purges against.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      }
+    },
     "/chat/api/v1/conversations/{conversation_id}/read": {
       "post": {
         "operationId": "chat_api_v1_conversations_read_create",
-        "description": "Advance the requesting user's read marker in a conversation.\n\n**Permissions:** `IsAuthenticated`",
+        "description": "Advance the requesting user's read and delivery markers.\n\nBoth markers are durable rows and both fan out a live receipt when they\nmove — ``chat.read`` / ``chat.delivered`` on the conversation stream. The\nreceipt is a Signal, not an event: the truth is on the participant row and\ncomes back with the conversation, so nobody who was offline is owed a\nreplay of a tick mark.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
             "in": "path",
@@ -495,6 +654,96 @@
   },
   "components": {
     "schemas": {
+      "ActivityRequest": {
+        "type": "object",
+        "description": "Announce what the caller is doing right now.",
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "A name from the open activity registry — ``typing``,"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "AttachmentResponse": {
+        "type": "object",
+        "description": "One attachment, carrying everything a bubble needs to paint on first\nframe — no second round trip, and no reflow when the asset lands.\n\nEvery field is present on every attachment, ``null`` where it does not\napply or the CDN has not produced it yet; which of them a given ``type``\nis expected to populate is declared by the attachment-type registry\n(:mod:`stapel_chat.attachments`), which is open — ``sticker`` is a\nsettings line, not a release.",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Opaque CDN ref (``<type>/<hash>``). The only field this module"
+          },
+          "type": {
+            "type": "string",
+            "description": "Registry type — ``image`` / ``gif`` / ``video`` / ``voice`` /"
+          },
+          "mime": {
+            "type": "string",
+            "nullable": true,
+            "description": "Content type"
+          },
+          "bytes": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Byte size of the original"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "description": "Original filename (documents)"
+          },
+          "ext": {
+            "type": "string",
+            "nullable": true,
+            "description": "Lowercase extension without the dot (documents)"
+          },
+          "width": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Pixel width (image/gif/video)"
+          },
+          "height": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Pixel height (image/gif/video)"
+          },
+          "aspect": {
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "description": "``width / height`` — the number that reserves the box before"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Playback length (voice/video)"
+          },
+          "preview_b64": {
+            "type": "string",
+            "nullable": true,
+            "description": "~16px webp micro-thumbnail as a ``data:`` URI — the"
+          },
+          "waveform_b64": {
+            "type": "string",
+            "nullable": true,
+            "description": "Waveform image as a ``data:`` URI (voice)"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "Per-tier CDN geometry ``[{tier, branch, url, width,"
+          }
+        },
+        "required": [
+          "key",
+          "type"
+        ]
+      },
       "ConversationResponse": {
         "type": "object",
         "description": "A conversation (thread).",
@@ -532,6 +781,14 @@
             "type": "string",
             "format": "date-time",
             "description": "Last-activity time"
+          },
+          "stream_key": {
+            "type": "string",
+            "description": "The realtime stream this conversation lives on"
+          },
+          "socket_path": {
+            "type": "string",
+            "description": "Where to open it (``ws/chat/<id>``), relative to the"
           },
           "assigned_operator_id": {
             "type": "string",
@@ -580,11 +837,15 @@
       },
       "MarkReadRequest": {
         "type": "object",
-        "description": "Advance the requesting user's read marker.",
+        "description": "Advance the requesting user's read/delivery markers.",
         "properties": {
           "upto_seq": {
             "type": "integer",
             "description": "seq of the newest message now considered read"
+          },
+          "delivered_upto_seq": {
+            "type": "integer",
+            "description": "seq of the newest message the client holds. Omit"
           }
         },
         "required": [
@@ -593,7 +854,7 @@
       },
       "MessageResponse": {
         "type": "object",
-        "description": "A single message.",
+        "description": "A single message — or its tombstone.\n\nA deleted message is still returned: same ``id``, same ``seq``, empty\n``body``, empty ``attachments``, ``deleted=true``. That is deliberate, and\nit is what a client cache needs — an id that stops arriving is an id\nnobody can purge.",
         "properties": {
           "id": {
             "type": "string",
@@ -605,7 +866,11 @@
           },
           "seq": {
             "type": "integer",
-            "description": "Monotonic per-conversation order key"
+            "description": "Position in the thread. Immutable — sort by this"
+          },
+          "rev_seq": {
+            "type": "integer",
+            "description": "Position in the conversation's revision journal; changes on"
           },
           "kind": {
             "type": "string",
@@ -613,7 +878,7 @@
           },
           "body": {
             "type": "string",
-            "description": "Message text (may be empty when only attachments are present)"
+            "description": "Message text (empty when only attachments are present, and"
           },
           "created_at": {
             "type": "string",
@@ -633,9 +898,34 @@
           "attachments": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/AttachmentResponse"
             },
-            "description": "Opaque attachment keys (files live in the host CDN)"
+            "description": "Render descriptors (see :class:`AttachmentResponse`)"
+          },
+          "client_msg_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "The sender's own idempotency key, echoed back so an"
+          },
+          "edited": {
+            "type": "boolean",
+            "description": "Whether the body was changed after posting"
+          },
+          "edited_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When it was changed (null if never)"
+          },
+          "deleted": {
+            "type": "boolean",
+            "description": "Whether this is a tombstone"
+          },
+          "deleted_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When it was deleted (null if live)"
           }
         },
         "required": [
@@ -644,6 +934,7 @@
           "created_at",
           "id",
           "kind",
+          "rev_seq",
           "seq"
         ]
       },
@@ -740,6 +1031,10 @@
           "last_read_seq": {
             "type": "integer",
             "description": "seq of the newest message this participant has read"
+          },
+          "last_delivered_seq": {
+            "type": "integer",
+            "description": "seq of the newest message their client"
           }
         },
         "required": [
@@ -748,9 +1043,19 @@
           "user_id"
         ]
       },
+      "PatchedEditMessageRequest": {
+        "type": "object",
+        "description": "Replace a message's body. Author only.",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The new text. An edit cannot empty a message — deleting is the"
+          }
+        }
+      },
       "SendMessageRequest": {
         "type": "object",
-        "description": "Post a message.",
+        "description": "Post a message.\n\nThere is deliberately **no draft**. A compose box is client state; the\nserver has one verb, and it is \"send\". A server-side draft concept would\nput a save round trip between the Enter key and the message, which is\nprecisely the thing that must not exist.",
         "properties": {
           "body": {
             "type": "string",
@@ -759,14 +1064,39 @@
           "attachments": {
             "type": "array",
             "items": {
-              "type": "string"
-            },
-            "description": "Opaque attachment keys (host CDN references)"
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "type"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string",
+                      "description": "Attachment type from the OPEN registry — image / gif / video / voice / file out of the box, plus whatever STAPEL_CHAT['ATTACHMENT_TYPES'] adds."
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                {
+                  "type": "string",
+                  "description": "Bare CDN ref (pre-0.3 form)."
+                }
+              ]
+            }
           },
           "reply_to": {
             "type": "string",
             "nullable": true,
             "description": "Message id being replied to (must be in this conversation)"
+          },
+          "client_msg_id": {
+            "type": "string",
+            "description": "Sender-generated idempotency key. Retrying the same"
           }
         }
       }

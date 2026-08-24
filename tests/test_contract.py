@@ -43,6 +43,17 @@ TRIAD = ("schema.json", "flows.json", "errors.json")
 ARTIFACTS = TRIAD + ("capabilities.json", "llms.txt")
 
 
+def _llms_budget() -> str:
+    """The `LLMS_BUDGET ?= N` line in the Makefile — one source, not two."""
+    for line in (REPO / "Makefile").read_text().splitlines():
+        if line.startswith("LLMS_BUDGET"):
+            return line.split("=")[-1].strip()
+    raise AssertionError("Makefile no longer declares LLMS_BUDGET")
+
+
+LLMS_BUDGET = _llms_budget()
+
+
 def _emit(out_dir: Path) -> None:
     for module in ("stapel_chat._codegen", "stapel_chat._capabilities"):
         subprocess.run(
@@ -52,7 +63,14 @@ def _emit(out_dir: Path) -> None:
             capture_output=True,
         )
     subprocess.run(
-        [sys.executable, "-m", "stapel_tools.llms_txt", ".", "--out", str(out_dir)],
+        [
+            sys.executable, "-m", "stapel_tools.llms_txt", ".",
+            "--out", str(out_dir),
+            # Same deliberate ceiling the Makefile passes, and read from it so
+            # the two can never disagree — a gate that emits under different
+            # settings than the release does is not a gate.
+            "--budget", str(LLMS_BUDGET),
+        ],
         cwd=str(REPO),
         check=True,
         capture_output=True,
@@ -138,7 +156,17 @@ def _capabilities() -> dict:
 
 def test_capabilities_axes():
     axes = {a["key"]: a for a in _capabilities()["axes"]}
-    assert set(axes) == {"CHAT_KINDS", "ATTACHMENTS", "MAX_BODY_LENGTH"}
+    assert set(axes) == {
+        "CHAT_KINDS",
+        "ATTACHMENTS",
+        "MAX_BODY_LENGTH",
+        "ATTACHMENT_TYPES",
+        "ATTACHMENT_METADATA",
+        "MAX_ATTACHMENTS",
+        "MAX_PREVIEW_B64_BYTES",
+        "ACTIVITY_STATES",
+        "EDIT_WINDOW_S",
+    }
     assert axes["CHAT_KINDS"]["kind"] == "list"
     assert axes["ATTACHMENTS"]["kind"] == "bool"
     # Behavioral, not gating: they change what endpoints accept, not which exist.

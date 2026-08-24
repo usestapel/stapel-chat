@@ -10,9 +10,11 @@ from typing import NamedTuple
 from django.urls import path
 
 from .views import (
+    ActivityView,
     ConversationDetailView,
     ConversationListCreateView,
     MarkReadView,
+    MessageDetailView,
     MessageListCreateView,
     SupportAssignView,
     SupportQueueView,
@@ -37,9 +39,19 @@ urlpatterns = [
         name="chat-conversation-messages",
     ),
     path(
+        "conversations/<uuid:conversation_id>/messages/<uuid:message_id>",
+        MessageDetailView.as_view(),
+        name="chat-message-detail",
+    ),
+    path(
         "conversations/<uuid:conversation_id>/read",
         MarkReadView.as_view(),
         name="chat-conversation-read",
+    ),
+    path(
+        "conversations/<uuid:conversation_id>/activity",
+        ActivityView.as_view(),
+        name="chat-conversation-activity",
     ),
     path(
         "support/queue",

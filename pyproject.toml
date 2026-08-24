@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-chat"
-version = "0.2.3"
+version = "0.3.0"
 description = "Conversations, messaging and support chat for the Stapel framework"
 readme = "README.md"
 license = { text = "MIT" }
@@ -24,9 +24,14 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # Floor: 0.36.0 fixes AnchorPagination's direction=prev bug — history
-    # paging relies on the fixed semantics.
-    "stapel-core>=0.36.0,<1.0",
+    # Floor: 0.41.0 — the canonical SerializerSeamMixin/StapelAPIView
+    # (0.37.0), and the deletion gate whose reasoning the message tombstone
+    # reuses (0.40.0 + its mint half in 0.41.0).
+    "stapel-core>=0.41.0,<1.0",
+    # The WebSocket substrate. Not an extra: since 0.3.0 realtime is the
+    # canonical path, and chat's stream keys, wire envelope and consumers are
+    # all stapel-realtime's. Importing it costs nothing without Channels.
+    "stapel-realtime>=0.1.1,<1.0",
 ]
 
 [project.urls]
@@ -37,10 +42,14 @@ Changelog = "https://github.com/usestapel/stapel-chat/blob/main/CHANGELOG.md"
 Issues = "https://github.com/usestapel/stapel-chat/issues"
 
 [project.optional-dependencies]
-# Realtime delivery is optional — the module is correct (replay by seq) without
-# it. Install to run the Channels consumer (stapel_chat.consumers.ChatConsumer).
-channels = ["stapel-core[channels]>=0.36.0,<1.0"]
-all = ["stapel-core[channels]>=0.36.0,<1.0"]
+# Serving the sockets needs Channels. This is not "realtime is optional" — a
+# deployment without it fails `manage.py check` (stapel_chat.E010/E011) rather
+# than degrading into a polling product. The extra exists because a build that
+# only imports the models or the emit schemas should not pull an ASGI stack.
+realtime = ["stapel-realtime[channels]>=0.1.1,<1.0"]
+# Deprecated alias kept for one release.
+channels = ["stapel-realtime[channels]>=0.1.1,<1.0"]
+all = ["stapel-realtime[channels]>=0.1.1,<1.0"]
 
 [tool.setuptools]
 package-dir = {"stapel_chat" = "."}

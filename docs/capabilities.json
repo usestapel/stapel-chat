@@ -1,7 +1,7 @@
 {
   "module": "stapel-chat",
-  "version": "0.2.3",
-  "provides": "Conversations and messaging: direct (1:1, idempotent by participant pair), group and support threads on one model; text/system messages with a monotonic per-conversation seq, replies and opaque CDN attachment keys; per-participant read markers and unread counts; anchor-paginated history (canonical anchor=seq) and conversation lists; a support layer (unassigned queue, first-come assignment, open/pending/resolved with reopen); and an optional Channels consumer for realtime delivery with seq-replay resume.",
+  "version": "0.3.0",
+  "provides": "Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).",
   "axes": [
     {
       "key": "CHAT_KINDS",
@@ -33,7 +33,7 @@
         "behavior": "off: a message with a non-empty attachments list is rejected (400); on: attachment keys are accepted and stored on the message."
       },
       "curated": {
-        "summary": "When on, a message may carry a list of opaque attachment keys (the files live in the host's CDN/storage; the module stores only the keys). When off, any message with an attachment is rejected. Text is always allowed.",
+        "summary": "When on, a message may carry attachments — an opaque CDN key plus the render metadata a bubble needs to paint immediately (the bytes live in the host's CDN; the module stores only the descriptor). When off, any message with an attachment is rejected. Text is always allowed.",
         "business_label": "Allow message attachments"
       }
     },
@@ -50,6 +50,96 @@
       "curated": {
         "summary": "Hard cap, in characters, on a single text message body. A longer body is rejected before it is stored. Raise it for long-form support replies, lower it for terse chat.",
         "business_label": "Maximum message length"
+      }
+    },
+    {
+      "key": "ATTACHMENT_TYPES",
+      "kind": "enum",
+      "default": {},
+      "group": "chat.attachments",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "Merged over the builtins; a value of None removes a builtin. A message naming an unregistered type is rejected (400)."
+      },
+      "curated": {
+        "summary": "The catalogue of attachment kinds this deployment accepts. Out of the box: photos, animated GIFs, video, voice messages and documents. It is an open list, not a fixed one — a product that wants stickers, locations or contact cards adds them in configuration, and the API accepts them the same day. Removing a kind (say, voice) refuses it at the boundary.",
+        "business_label": "Which kinds of attachment exist"
+      }
+    },
+    {
+      "key": "ACTIVITY_STATES",
+      "kind": "enum",
+      "default": {},
+      "group": "chat.realtime",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "Merged over the builtins; None removes one. An unregistered state is refused (400 over HTTP, an error frame over the socket)."
+      },
+      "curated": {
+        "summary": "What one participant can be shown to be doing right now — typing, recording a voice message, sending a video, uploading a file. Also an open list: \"choosing a sticker\" is a configuration entry, not a release. Each state carries how long it stays on screen without a refresh, so an indicator disappears on its own when someone closes their laptop mid-word.",
+        "business_label": "Which live activity indicators exist"
+      }
+    },
+    {
+      "key": "ATTACHMENT_METADATA",
+      "kind": "enum",
+      "default": "cdn",
+      "group": "chat.attachments",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "cdn: the describe answer is merged over the client's fields; an unreachable CDN leaves the client's values in place rather than failing the send. client: no call is made."
+      },
+      "curated": {
+        "summary": "\"cdn\" (the default) asks the CDN to describe every attachment as it is sent, so thumbnails, aspect ratios, durations and waveforms are computed once by the service that owns the file. \"client\" trusts what the sender's app supplied and makes no call — faster, and only sound where the sender is trusted.",
+        "business_label": "Where attachment previews come from"
+      }
+    },
+    {
+      "key": "MAX_ATTACHMENTS",
+      "kind": "enum",
+      "default": 10,
+      "group": "chat.attachments",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "A message with more attachments than this is rejected (400)."
+      },
+      "curated": {
+        "summary": "How many files one message may carry.",
+        "business_label": "Attachments per message"
+      }
+    },
+    {
+      "key": "MAX_PREVIEW_B64_BYTES",
+      "kind": "enum",
+      "default": 8192,
+      "group": "chat.limits",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "An inline preview over this size, or one that is not an image data URI, is rejected (400)."
+      },
+      "curated": {
+        "summary": "Ceiling on the tiny preview image that travels inside the message itself (the blur-up thumbnail, the voice waveform). A real 16px preview is a few hundred bytes; the cap exists because these are bytes from one user rendered on another user's screen.",
+        "business_label": "Maximum inline preview size"
+      }
+    },
+    {
+      "key": "EDIT_WINDOW_S",
+      "kind": "enum",
+      "default": 0,
+      "group": "chat.limits",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "An edit after the window is rejected (400); 0 disables the deadline entirely."
+      },
+      "curated": {
+        "summary": "Seconds after posting during which the author may still correct their own message. Zero — the default — means there is no deadline. Deleting is unaffected: a message can always be taken back, and taking it back leaves a tombstone rather than a hole.",
+        "business_label": "How long a message stays editable"
       }
     }
   ],
@@ -73,20 +163,46 @@
       "name": "serializer_seams",
       "kind": "class_override",
       "summary": "Every view declares request/response serializer seams (SerializerSeamMixin) — subclass the view, override the attribute, remount the URL."
+    },
+    {
+      "name": "ATTACHMENT_TYPES",
+      "kind": "merge_registry",
+      "summary": "The OPEN attachment-type registry — builtins (image, gif, video, voice, file) merged under the setting and then under register_attachment_type(), later wins, None removes. Stickers are the named next type: adding one is a settings line, not a contract change."
+    },
+    {
+      "name": "ACTIVITY_STATES",
+      "kind": "merge_registry",
+      "summary": "The OPEN activity registry — typing, recording audio, sending video, uploading file, idle — with the same merge semantics. \"Choosing a sticker\" is a settings line."
+    },
+    {
+      "name": "chat.message.edited",
+      "kind": "comm_event",
+      "summary": "Emitted when an author replaces a message body. Carries a fresh revision sequence, which is what makes the edit reachable by a client that was offline when it happened."
+    },
+    {
+      "name": "chat.message.deleted",
+      "kind": "comm_event",
+      "summary": "Emitted when a message becomes a tombstone. The row is not removed — the id keeps being delivered, stripped, so every client cache learns which one to purge."
     }
   ],
   "surface": [
     {
+      "name": "announce_activity",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.announce_activity",
+      "intent": "Fan out \"typing…\" (or any registered state) to everyone watching, with the TTL that makes the indicator expire on its own — the only design that survives a tab closed mid-word. Nothing is persisted; someone who is not connected is owed nothing."
+    },
+    {
       "name": "assign_operator",
       "kind": "gate_function",
       "path": "stapel_chat.services.assign_operator",
-      "intent": "First-come claim of a support thread: re-reads the conversation under select_for_update, refuses a second operator with AlreadyAssigned, stays idempotent for the same one, adds the operator participant, emits chat.support.assigned and posts the system line. Two operators pressing \"take\" in the same second is the race this exists for — setting assigned_operator directly loses it and silently steals the thread."
+      "intent": "First-come claim of a support thread under a row lock: refuses a second operator, stays idempotent for the same one, adds the participant, emits the event and posts the system line. Two operators pressing \"take\" in the same second is the race this exists for."
     },
     {
       "name": "create_direct",
       "kind": "factory",
       "path": "stapel_chat.services.create_direct",
-      "intent": "Get-or-create the 1:1 thread between two users — idempotent by an order-independent direct_key over (scope_key, both ids), with the create race decided by the partial unique constraint (the loser returns the winner's row). Reach for this instead of your own get_or_create over a participant pair: a hand-rolled one has nothing unique to key on and quietly hands the two users two different threads.",
+      "intent": "Get-or-create the 1:1 thread between two users — idempotent by an order-independent key over (scope, both ids), with the create race decided by a partial unique constraint. A hand-rolled get_or_create has nothing unique to key on and quietly hands the two users two different threads.",
       "instead_of": [
         "stapel_chat.models.Conversation.objects.get_or_create"
       ]
@@ -95,7 +211,7 @@
       "name": "create_group",
       "kind": "factory",
       "path": "stapel_chat.services.create_group",
-      "intent": "Create a group thread and seed its participant rows in the same call (owner first, ids deduped, conflicts ignored). Group threads are deliberately never deduplicated — each call is a new conversation. A Conversation row created by hand has no participants, and the list endpoint filters on participants__user, so nobody can see it.",
+      "intent": "Create a group thread and seed its participant rows in one call (owner first, ids deduped). A Conversation row created by hand has no participants, and the list endpoint filters on participants — so nobody can see it.",
       "instead_of": [
         "stapel_chat.models.Conversation.objects.create"
       ]
@@ -104,16 +220,58 @@
       "name": "create_support",
       "kind": "factory",
       "path": "stapel_chat.services.create_support",
-      "intent": "Open a support thread for a customer — unassigned, support_status=open, customer seeded as the participant, which is exactly the shape support_queue() selects on. Call it from an order/ticket flow instead of writing the row: a support conversation with a blank status or no participant is one no operator will ever be shown.",
+      "intent": "Open a support thread for a customer — unassigned, status open, customer seeded as participant, which is exactly the shape the queue selects on. A support conversation with a blank status or no participant is one no operator will ever be shown.",
       "instead_of": [
         "stapel_chat.models.Conversation.objects.create"
+      ]
+    },
+    {
+      "name": "delete_message",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.delete_message",
+      "intent": "Turn a message into a TOMBSTONE — content emptied, deleted_at stamped, fresh revision sequence — instead of removing the row. Deleting the row destroys the message on the server and leaves every copy on every other device, because nothing tells those devices which id ceased to exist.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.delete"
+      ]
+    },
+    {
+      "name": "edit_message",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.edit_message",
+      "intent": "Replace a message body, stamp edited_at, and — the part a hand-written update always misses — take a FRESH revision sequence. Anchored on the message's own seq an edit sits behind a cursor every client has already acknowledged, so nobody who was offline would ever see it.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.update"
+      ]
+    },
+    {
+      "name": "erase_user_messages",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.erase_user_messages",
+      "intent": "The erasure path: every message a user wrote becomes an anonymous tombstone, sequences reserved as one block per thread. Content is destroyed either way — only this way does the destruction reach the devices still displaying it.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.delete"
+      ]
+    },
+    {
+      "name": "journal_rows",
+      "kind": "factory",
+      "path": "stapel_chat.services.journal_rows",
+      "intent": "The replay source a resuming socket reads: rows past the client's cursor by REVISION sequence. Filtering on the message's own seq is the bug this exists to prevent — it silently drops every edit and tombstone that happened while the client was away."
+    },
+    {
+      "name": "mark_delivered",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.mark_delivered",
+      "intent": "Advance the DELIVERY marker (never backwards) and fan out its receipt. Delivered is a weaker fact than read and a real one, and only the client knows the difference — which is why it is an explicit call, not something inferred from an open socket.",
+      "instead_of": [
+        "stapel_chat.models.ConversationParticipant.objects.update"
       ]
     },
     {
       "name": "mark_read",
       "kind": "gate_function",
       "path": "stapel_chat.services.mark_read",
-      "intent": "Advance a participant's read marker to upto_seq and never backwards — the update is filtered on last_read_seq__lt, and the return value says whether it actually moved. Assigning last_read_seq yourself lets an out-of-order client rewind the marker and resurrect already-read messages as unread.",
+      "intent": "Advance a read marker to upto_seq and never backwards, and fan out the receipt when it moves. Assigning last_read_seq yourself lets an out-of-order client rewind the marker, resurrect read messages as unread, and tells nobody's screen anything.",
       "instead_of": [
         "stapel_chat.models.ConversationParticipant.objects.update"
       ]
@@ -122,7 +280,7 @@
       "name": "post_message",
       "kind": "factory",
       "path": "stapel_chat.services.post_message",
-      "intent": "THE send path, and the only sanctioned way a message comes into being: allocates the next per-conversation seq under a select_for_update row lock, persists the row and writes the chat.message outbox event in ONE transaction (mutate_and_emit), schedules best-effort realtime fan-out on_commit, retries on a seq collision. Inserting a Message with a seq you chose yourself bypasses the counter, breaks the gapless total order that anchor-paginated history and realtime resume both anchor on, and emits nothing at all.",
+      "intent": "THE send path, and the only sanctioned way a message comes into being: allocates the next seq under a row lock, persists the row and the chat.message outbox event in ONE transaction, normalizes and CDN-enriches the attachments once, fans out to the sockets on commit, and returns the existing row when a client_msg_id is retried. Inserting a Message with your own seq bypasses the counter, breaks the order history paging and realtime resume both anchor on, emits nothing, and reaches no open socket.",
       "instead_of": [
         "stapel_chat.models.Message.objects.create"
       ]
@@ -131,37 +289,37 @@
       "name": "reopen_support",
       "kind": "gate_function",
       "path": "stapel_chat.services.reopen_support",
-      "intent": "Reopen a resolved thread back to open with the chat.support.reopened system line. Note it re-enters support_queue() only while no operator is assigned — a reopened thread stays with its previous operator by design."
+      "intent": "Reopen a resolved thread with its system line. It re-enters the queue only while no operator is assigned — a reopened thread stays with its previous operator by design."
     },
     {
       "name": "resolve_support",
       "kind": "gate_function",
       "path": "stapel_chat.services.resolve_support",
-      "intent": "Close a support thread — status=resolved plus the chat.support.resolved system line. Call the wrapper so \"resolved\" reads the same way in every deployment's transcript and no thread is closed without a marker in its history."
+      "intent": "Close a support thread — status resolved plus its system line — so \"resolved\" reads the same way in every deployment's transcript and no thread closes without a marker in its history."
     },
     {
       "name": "set_support_status",
       "kind": "gate_function",
       "path": "stapel_chat.services.set_support_status",
-      "intent": "Move a support thread between open/pending/resolved and optionally post the system line marking the transition; refuses a direct/group conversation with NotSupport. This is the one to call for pending, which has no dedicated wrapper."
+      "intent": "Move a support thread between open/pending/resolved and optionally post the system line marking the transition. The one to call for pending, which has no dedicated wrapper."
     },
     {
       "name": "support_queue",
       "kind": "factory",
       "path": "stapel_chat.services.support_queue",
-      "intent": "The operator queue as a queryset: unassigned support conversations still open or pending, oldest first. Pass qs= to pre-scope it (typically the SCOPE_PROVIDER filter) rather than re-deriving the filter — \"what is still waiting for an operator\" is policy, and a second copy of it drifts from the one assign_operator enforces."
+      "intent": "The operator queue as a queryset: unassigned support threads still open or pending, oldest first. Pass qs= to pre-scope it rather than re-deriving the filter — a second copy of \"what is still waiting\" drifts from the one assign_operator enforces."
     },
     {
       "name": "unread_count",
       "kind": "factory",
       "path": "stapel_chat.services.unread_count",
-      "intent": "Messages past a participant's marker that somebody else authored — system lines (null sender) and the participant's own messages are excluded, and that exclusion is the whole difference from a naive count: a hand-rolled seq__gt count lights the badge for your own message and for every \"operator assigned\" system line.",
+      "intent": "Messages past a participant's marker that somebody else authored — system lines, your own messages and tombstones excluded. A naive seq__gt count lights the badge for your own message, for every system line, and for a message deleted before you got to it: a badge nobody can clear.",
       "instead_of": [
         "stapel_chat.models.Message.objects.count"
       ]
     }
   ],
-  "operations_total": 10,
+  "operations_total": 13,
   "requires": [
     {
       "module": "stapel-core",
@@ -176,7 +334,12 @@
     {
       "module": "stapel-cdn",
       "optional": true,
-      "reason": "messages carry opaque attachment keys only; a file/CDN module (or any host storage) owns the bytes those keys point at"
+      "reason": "attachment render metadata — chat calls cdn.describe by comm to denormalize aspect, byte size, the 16px micro-thumbnail, video poster and duration, and the voice waveform, once, at send time. Optional: without it a message still sends carrying whatever the client supplied."
+    },
+    {
+      "module": "stapel-realtime",
+      "optional": false,
+      "reason": "the WebSocket substrate — both consumers, the v1 wire envelope, the stream-key canon, the fail-closed authorize seam, the close-code set and the origin guard. Not optional: realtime is the canonical path, and chat previously carried its own duplicate socket implementation."
     }
   ]
 }

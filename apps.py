@@ -9,9 +9,14 @@ class ChatConfig(AppConfig):
 
     def ready(self):
         # Import-time side effects: comm actions/functions, system checks,
-        # error-key registration. Keep each in its own module. Realtime
-        # (consumers.py) is deliberately NOT imported here — Channels is an
-        # optional extra and an HTTP-only host must not pay for it.
+        # error-key registration. Keep each in its own module.
+        #
+        # consumers.py is still NOT imported here — the routes are discovered
+        # from routing.py by stapel_realtime's host assembly, and a build that
+        # only needs the models or the emit schemas should not be made to
+        # import an ASGI stack. That is a packaging boundary, not an "optional
+        # realtime": checks.py refuses to boot a deployment that cannot serve
+        # the socket.
         from . import actions  # noqa: F401
         from . import checks  # noqa: F401
         from . import errors  # noqa: F401

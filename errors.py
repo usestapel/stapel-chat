@@ -13,9 +13,16 @@ ERR_400_ATTACHMENTS_DISABLED = "error.400.chat_attachments_disabled"
 ERR_400_INVALID_DIRECT = "error.400.chat_invalid_direct"
 ERR_400_INVALID_REPLY = "error.400.chat_invalid_reply"
 ERR_400_NOT_SUPPORT = "error.400.chat_not_support"
+ERR_400_INVALID_ATTACHMENT = "error.400.chat_invalid_attachment"
+ERR_400_UNKNOWN_ATTACHMENT_TYPE = "error.400.chat_unknown_attachment_type"
+ERR_400_UNKNOWN_ACTIVITY_STATE = "error.400.chat_unknown_activity_state"
+ERR_400_MESSAGE_DELETED = "error.400.chat_message_deleted"
+ERR_400_NOT_EDITABLE = "error.400.chat_not_editable"
 ERR_403_NOT_PARTICIPANT = "error.403.chat_not_participant"
 ERR_403_NOT_OPERATOR = "error.403.chat_not_operator"
+ERR_403_NOT_AUTHOR = "error.403.chat_not_author"
 ERR_404_CONVERSATION_NOT_FOUND = "error.404.chat_conversation_not_found"
+ERR_404_MESSAGE_NOT_FOUND = "error.404.chat_message_not_found"
 ERR_409_ALREADY_ASSIGNED = "error.409.chat_already_assigned"
 
 STAPEL_CHAT_ERRORS = {
@@ -27,9 +34,16 @@ STAPEL_CHAT_ERRORS = {
     ERR_400_INVALID_DIRECT: "A direct conversation needs exactly one other participant",
     ERR_400_INVALID_REPLY: "The replied-to message does not belong to this conversation",
     ERR_400_NOT_SUPPORT: "This operation applies only to support conversations",
+    ERR_400_INVALID_ATTACHMENT: "An attachment is malformed or its preview is too large",
+    ERR_400_UNKNOWN_ATTACHMENT_TYPE: "This attachment type is not registered in this deployment",
+    ERR_400_UNKNOWN_ACTIVITY_STATE: "This activity state is not registered in this deployment",
+    ERR_400_MESSAGE_DELETED: "This message has been deleted",
+    ERR_400_NOT_EDITABLE: "This message can no longer be edited",
     ERR_403_NOT_PARTICIPANT: "You are not a participant of this conversation",
     ERR_403_NOT_OPERATOR: "Only a support operator may perform this action",
+    ERR_403_NOT_AUTHOR: "Only the author may edit or delete this message",
     ERR_404_CONVERSATION_NOT_FOUND: "Conversation not found",
+    ERR_404_MESSAGE_NOT_FOUND: "Message not found in this conversation",
     ERR_409_ALREADY_ASSIGNED: "This support conversation is already assigned",
 }
 
@@ -45,8 +59,15 @@ __all__ = [
     "ERR_400_INVALID_DIRECT",
     "ERR_400_INVALID_REPLY",
     "ERR_400_NOT_SUPPORT",
+    "ERR_400_INVALID_ATTACHMENT",
+    "ERR_400_UNKNOWN_ATTACHMENT_TYPE",
+    "ERR_400_UNKNOWN_ACTIVITY_STATE",
+    "ERR_400_MESSAGE_DELETED",
+    "ERR_400_NOT_EDITABLE",
     "ERR_403_NOT_PARTICIPANT",
     "ERR_403_NOT_OPERATOR",
+    "ERR_403_NOT_AUTHOR",
     "ERR_404_CONVERSATION_NOT_FOUND",
+    "ERR_404_MESSAGE_NOT_FOUND",
     "ERR_409_ALREADY_ASSIGNED",
 ]

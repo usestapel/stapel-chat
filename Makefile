@@ -9,6 +9,16 @@
 # targets are the dev-loop convenience.
 PYTHON ?= python3
 
+# Deliberate ceiling for docs/llms.txt, raised from the 4000 default in 0.3.0.
+# The module's addressable surface grew in one release — two sockets instead of
+# one, two OPEN registries (attachment types, activity states), edit/delete with
+# tombstone semantics, receipts, and 19 error codes instead of 12 — and the
+# lines that would have to go to fit 4000 are the ones explaining WHY a mutation
+# takes a fresh revision sequence and why a delete leaves a row behind. Those are
+# exactly the sentences an agent reading this file needs. Trim before raising it
+# again.
+LLMS_BUDGET ?= 4600
+
 .PHONY: contract contract-check
 
 # Emit the contract triad + capabilities.json into docs/, then the fifth
@@ -23,7 +33,7 @@ PYTHON ?= python3
 contract:
 	$(PYTHON) -m stapel_chat._codegen --out docs
 	$(PYTHON) -m stapel_chat._capabilities --out docs
-	$(PYTHON) -m stapel_tools.llms_txt . --out docs
+	$(PYTHON) -m stapel_tools.llms_txt . --out docs --budget $(LLMS_BUDGET)
 	$(PYTHON) -m stapel_tools.readme .
 
 # Drift gate: regenerate into a temp dir and diff against the committed docs/*
@@ -32,7 +42,7 @@ contract-check:
 	@tmp=$$(mktemp -d); \
 	$(PYTHON) -m stapel_chat._codegen --out "$$tmp" || { rm -rf "$$tmp"; exit 1; }; \
 	$(PYTHON) -m stapel_chat._capabilities --out "$$tmp" || { rm -rf "$$tmp"; exit 1; }; \
-	$(PYTHON) -m stapel_tools.llms_txt . --out "$$tmp" || { rm -rf "$$tmp"; exit 1; }; \
+	$(PYTHON) -m stapel_tools.llms_txt . --out "$$tmp" --budget $(LLMS_BUDGET) || { rm -rf "$$tmp"; exit 1; }; \
 	rc=0; \
 	for f in schema.json flows.json errors.json capabilities.json llms.txt; do \
 		if ! diff -q "docs/$$f" "$$tmp/$$f" >/dev/null 2>&1; then \

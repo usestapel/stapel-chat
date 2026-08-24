@@ -14,6 +14,12 @@ The one documented extension seam (see MODULE.md):
   request (a host may supply e.g. ``workspace_id``). The library is
   scope-agnostic; the default is a no-op single global scope.
 
+**There is no key that turns realtime off.** Since 0.3.0 the socket is the
+canonical path and a deployment that cannot serve one fails ``manage.py
+check`` (``stapel_chat.E010``-``E014``) instead of degrading into a poll. A
+knob here would be the defect: the product that shipped "updates every few
+seconds" got there without anybody choosing it.
+
 CTO-facing config axes (capability-config.md §16):
 
 - ``CHAT_KINDS`` — which conversation kinds this deployment offers
@@ -26,6 +32,13 @@ CTO-facing config axes (capability-config.md §16):
   never stores files itself, only opaque keys that point at the host's CDN.
 - ``MAX_BODY_LENGTH`` — hard cap on a text message body (characters). A longer
   body is rejected before it reaches the database.
+- ``ATTACHMENT_TYPES`` — the OPEN attachment-type registry (merge over
+  builtins, ``None`` removes). Stickers are the named next type; adding one is
+  a settings line, not a release here.
+- ``ACTIVITY_STATES`` — the OPEN activity registry ("typing", "recording
+  audio", …), same merge semantics. "Choosing a sticker" is a settings line.
+- ``EDIT_WINDOW_S`` — how long after posting an author may still edit their
+  own message. ``0`` means forever.
 """
 from stapel_core.conf import AppSettings
 
@@ -45,6 +58,28 @@ DEFAULTS = {
     # Hard cap on a text body in characters (an "int" tuning axis). Bodies over
     # this length are rejected up front.
     "MAX_BODY_LENGTH": 4000,
+    # OPEN attachment-type registry (attachments.py). Merged OVER the builtins
+    # {image, gif, video, voice, file}; a value of None removes a builtin. The
+    # entry declares `fields` — what a UI may expect populated for the type —
+    # and `media` — whether the ref resolves to a CDN asset worth describing.
+    "ATTACHMENT_TYPES": {},
+    # OPEN activity-state registry (activity.py). Merged OVER the builtins
+    # {idle, typing, recording_audio, sending_video, uploading_file}; None
+    # removes one. Each entry carries a `ttl_s` expiry hint for the client.
+    "ACTIVITY_STATES": {},
+    # Where an attachment's render metadata comes from: "cdn" asks
+    # `cdn.describe` by comm and merges its answer over the client's (the
+    # default — the CDN owns aspect/thumbnail/waveform); "client" trusts the
+    # sender and makes no call.
+    "ATTACHMENT_METADATA": "cdn",
+    # Most attachments one message may carry.
+    "MAX_ATTACHMENTS": 10,
+    # Ceiling on an inline base64 preview (micro-thumbnail / waveform) in
+    # bytes. These are untrusted bytes on their way to other people's screens
+    # and they ride inside every message frame; a ~16px webp is ~300 bytes.
+    "MAX_PREVIEW_B64_BYTES": 8192,
+    # Seconds an author may still edit their own message. 0 = no window.
+    "EDIT_WINDOW_S": 0,
     # Dotted path to a ScopeProvider — resolves the opaque scope_key from a
     # request and filters querysets by it. The default is a no-op (single
     # global scope); a host may return e.g. the active workspace_id.

@@ -48,6 +48,14 @@
     "owner": "stapel_chat"
   },
   {
+    "code": "error.400.chat_invalid_attachment",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "An attachment is malformed or its preview is too large",
+    "owner": "stapel_chat"
+  },
+  {
     "code": "error.400.chat_invalid_direct",
     "status": 400,
     "params": [],
@@ -80,11 +88,43 @@
     "owner": "stapel_chat"
   },
   {
+    "code": "error.400.chat_message_deleted",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "This message has been deleted",
+    "owner": "stapel_chat"
+  },
+  {
+    "code": "error.400.chat_not_editable",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "This message can no longer be edited",
+    "owner": "stapel_chat"
+  },
+  {
     "code": "error.400.chat_not_support",
     "status": 400,
     "params": [],
     "remediation": "fix_input",
     "en": "This operation applies only to support conversations",
+    "owner": "stapel_chat"
+  },
+  {
+    "code": "error.400.chat_unknown_activity_state",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "This activity state is not registered in this deployment",
+    "owner": "stapel_chat"
+  },
+  {
+    "code": "error.400.chat_unknown_attachment_type",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "This attachment type is not registered in this deployment",
     "owner": "stapel_chat"
   },
   {
@@ -258,6 +298,14 @@
     "owner": "stapel_core"
   },
   {
+    "code": "error.403.chat_not_author",
+    "status": 403,
+    "params": [],
+    "remediation": "retry",
+    "en": "Only the author may edit or delete this message",
+    "owner": "stapel_chat"
+  },
+  {
     "code": "error.403.chat_not_operator",
     "status": 403,
     "params": [],
@@ -319,6 +367,14 @@
     "params": [],
     "remediation": "retry",
     "en": "Conversation not found",
+    "owner": "stapel_chat"
+  },
+  {
+    "code": "error.404.chat_message_not_found",
+    "status": 404,
+    "params": [],
+    "remediation": "retry",
+    "en": "Message not found in this conversation",
     "owner": "stapel_chat"
   },
   {

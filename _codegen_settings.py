@@ -59,6 +59,10 @@ def settings_kwargs(
             "stapel_core.django.users",
             "rest_framework",
             "drf_spectacular",
+            # The WebSocket substrate. In INSTALLED_APPS because it carries
+            # system checks and registers the "channels" signal transport from
+            # its AppConfig.ready() — the same two lines a host writes.
+            "stapel_realtime",
             "stapel_chat",
         ],
         AUTH_USER_MODEL="users.User",
@@ -83,11 +87,20 @@ def settings_kwargs(
             "OUTBOX_ENABLED": False,
             "ACTION_TRANSPORT": "inprocess",
             "VALIDATE_SCHEMAS": True,
+            # Signals (typing, receipts, the inbox stream) are delivered by
+            # stapel-realtime's Channels transport. Leaving this at the "none"
+            # default is what stapel_chat.E013 refuses.
+            "SIGNAL_TRANSPORT": "channels",
         },
         # In-memory Channels layer so the realtime consumer tests can exercise
         # group fan-out without a broker.
         CHANNEL_LAYERS={
             "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
+        },
+        STAPEL_REALTIME={
+            # Exact origins, with their ports — an entry without the port is
+            # an allowlist that silently never matches (realtime.E003).
+            "ALLOWED_ORIGINS": ["http://testserver"],
         },
         MIGRATION_MODULES={
             "users": None,

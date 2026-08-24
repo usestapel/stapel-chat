@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "chat.message.edited",
+  "description": "A message's body was replaced by its author. The row carries a FRESH rev_seq, which is what makes the edit reachable by a client that was offline when it happened: anchored on seq it would sit behind a cursor the client had already acknowledged. `edited_at` is non-null on every instance of this event.",
+  "type": "object",
+  "required": [
+    "message_id",
+    "conversation_id",
+    "seq",
+    "rev_seq",
+    "edited_at"
+  ],
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conversation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conversation_kind": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "group",
+        "support"
+      ]
+    },
+    "scope_key": {
+      "type": "string"
+    },
+    "sender_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rev_seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "system"
+      ]
+    },
+    "body": {
+      "type": "string"
+    },
+    "reply_to": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "client_msg_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "edited_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "deleted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "attachments": {
+      "type": "array",
+      "description": "Render descriptors. `type` is an OPEN registry (image/gif/video/voice/file out of the box, plus whatever the host registered), not a closed enum.",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "type"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Opaque CDN ref, <type>/<hash>"
+          },
+          "type": {
+            "type": "string"
+          },
+          "mime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ext": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "aspect": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "preview_b64": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "~16px webp micro-thumbnail (or video poster) as a data: URI"
+          },
+          "waveform_b64": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Voice-message waveform image as a data: URI"
+          },
+          "variants": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": true
+}

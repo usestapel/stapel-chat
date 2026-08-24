@@ -1,57 +1,93 @@
-# stapel-chat 0.2.3
+# stapel-chat 0.3.0
 
-Conversations and messaging: direct (1:1, idempotent by participant pair), group and support threads on one model; text/system messages with a monotonic per-conversation seq, replies and opaque CDN attachment keys; per-participant read markers and unread counts; anchor-paginated history (canonical anchor=seq) and conversation lists; a support layer (unassigned queue, first-come assignment, open/pending/resolved with reopen); and an optional Channels consumer for realtime delivery with seq-replay resume.
+Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).
 
-Contract: axes 3 · surface 11 · extension points 4 · operations 10 · error codes 54.
+Contract: axes 9 · surface 17 · extension points 8 · operations 13 · error codes 61.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
 Settings keys; `default` is what you get by saying nothing. Turning an axis off unmounts the operations it gates.
+- ACTIVITY_STATES [enum, default {}] — Which live activity indicators exist
+  What one participant can be shown to be doing right now — typing, recording a voice message, sending a video, uploading a file. Also an open list: "choosing a sticker" is a configuration entry, not a release. Each state carries how long it stays on screen without a refresh, so an indicator disappears on its own when someone closes their laptop mid-word.
 - ATTACHMENTS [bool, default true] — Allow message attachments
-  When on, a message may carry a list of opaque attachment keys (the files live in the host's CDN/storage; the module stores only the keys). When off, any message with an attachment is rejected. Text is always allowed.
+  When on, a message may carry attachments — an opaque CDN key plus the render metadata a bubble needs to paint immediately (the bytes live in the host's CDN; the module stores only the descriptor). When off, any message with an attachment is rejected. Text is always allowed.
+- ATTACHMENT_METADATA [enum, default "cdn"] — Where attachment previews come from
+  "cdn" (the default) asks the CDN to describe every attachment as it is sent, so thumbnails, aspect ratios, durations and waveforms are computed once by the service that owns the file. "client" trusts what the sender's app supplied and makes no call — faster, and only sound where the sender is trusted.
+- ATTACHMENT_TYPES [enum, default {}] — Which kinds of attachment exist
+  The catalogue of attachment kinds this deployment accepts. Out of the box: photos, animated GIFs, video, voice messages and documents. It is an open list, not a fixed one — a product that wants stickers, locations or contact cards adds them in configuration, and the API accepts them the same day. Removing a kind (say, voice) refuses it at the boundary.
 - CHAT_KINDS [list, default ["direct", "group", "support"]] — Which conversation types are offered
   The enabled subset of direct (1:1), group and support threads. Drop "support" to run a pure peer-to-peer chat with no operator queue or assignment; drop "group" to allow only 1:1 direct threads. Creating (or, for support, operating on) a kind that is not enabled is refused. Values: any non-empty subset of direct, group, support.
+- EDIT_WINDOW_S [enum, default 0] — How long a message stays editable
+  Seconds after posting during which the author may still correct their own message. Zero — the default — means there is no deadline. Deleting is unaffected: a message can always be taken back, and taking it back leaves a tombstone rather than a hole.
+- MAX_ATTACHMENTS [enum, default 10] — Attachments per message
+  How many files one message may carry.
 - MAX_BODY_LENGTH [enum, default 4000] — Maximum message length
   Hard cap, in characters, on a single text message body. A longer body is rejected before it is stored. Raise it for long-form support replies, lower it for terse chat.
+- MAX_PREVIEW_B64_BYTES [enum, default 8192] — Maximum inline preview size
+  Ceiling on the tiny preview image that travels inside the message itself (the blur-up thumbnail, the voice waveform). A real 16px preview is a few hundred bytes; the cap exists because these are bytes from one user rendered on another user's screen.
 
 ## Usage surface — call these before writing your own
 This is the answer to "does Stapel already have something for X?". `instead of` names the outside symbol this one displaces.
 ### gate_function
+- announce_activity — stapel_chat.services.announce_activity
+  Fan out "typing…" (or any registered state) to everyone watching, with the TTL that makes the indicator expire on its own — the only design that survives a tab closed mid-word. Nothing is persisted; someone who is not connected is owed nothing.
 - assign_operator — stapel_chat.services.assign_operator
-  First-come claim of a support thread: re-reads the conversation under select_for_update, refuses a second operator with AlreadyAssigned, stays idempotent for the same one, adds the operator participant, emits chat.support.assigned and posts the system line. Two operators pressing "take" in the same second is the race this exists for — setting assigned_operator directly loses it and silently steals the thread.
+  First-come claim of a support thread under a row lock: refuses a second operator, stays idempotent for the same one, adds the participant, emits the event and posts the system line. Two operators pressing "take" in the same second is the race this exists for.
+- delete_message — stapel_chat.services.delete_message
+  instead of: stapel_chat.models.Message.objects.delete
+  Turn a message into a TOMBSTONE — content emptied, deleted_at stamped, fresh revision sequence — instead of removing the row. Deleting the row destroys the message on the server and leaves every copy on every other device, because nothing tells those devices which id ceased to exist.
+- edit_message — stapel_chat.services.edit_message
+  instead of: stapel_chat.models.Message.objects.update
+  Replace a message body, stamp edited_at, and — the part a hand-written update always misses — take a FRESH revision sequence. Anchored on the message's own seq an edit sits behind a cursor every client has already acknowledged, so nobody who was offline would ever see it.
+- erase_user_messages — stapel_chat.services.erase_user_messages
+  instead of: stapel_chat.models.Message.objects.delete
+  The erasure path: every message a user wrote becomes an anonymous tombstone, sequences reserved as one block per thread. Content is destroyed either way — only this way does the destruction reach the devices still displaying it.
+- mark_delivered — stapel_chat.services.mark_delivered
+  instead of: stapel_chat.models.ConversationParticipant.objects.update
+  Advance the DELIVERY marker (never backwards) and fan out its receipt. Delivered is a weaker fact than read and a real one, and only the client knows the difference — which is why it is an explicit call, not something inferred from an open socket.
 - mark_read — stapel_chat.services.mark_read
   instead of: stapel_chat.models.ConversationParticipant.objects.update
-  Advance a participant's read marker to upto_seq and never backwards — the update is filtered on last_read_seq__lt, and the return value says whether it actually moved. Assigning last_read_seq yourself lets an out-of-order client rewind the marker and resurrect already-read messages as unread.
+  Advance a read marker to upto_seq and never backwards, and fan out the receipt when it moves. Assigning last_read_seq yourself lets an out-of-order client rewind the marker, resurrect read messages as unread, and tells nobody's screen anything.
 - reopen_support — stapel_chat.services.reopen_support
-  Reopen a resolved thread back to open with the chat.support.reopened system line. Note it re-enters support_queue() only while no operator is assigned — a reopened thread stays with its previous operator by design.
+  Reopen a resolved thread with its system line. It re-enters the queue only while no operator is assigned — a reopened thread stays with its previous operator by design.
 - resolve_support — stapel_chat.services.resolve_support
-  Close a support thread — status=resolved plus the chat.support.resolved system line. Call the wrapper so "resolved" reads the same way in every deployment's transcript and no thread is closed without a marker in its history.
+  Close a support thread — status resolved plus its system line — so "resolved" reads the same way in every deployment's transcript and no thread closes without a marker in its history.
 - set_support_status — stapel_chat.services.set_support_status
-  Move a support thread between open/pending/resolved and optionally post the system line marking the transition; refuses a direct/group conversation with NotSupport. This is the one to call for pending, which has no dedicated wrapper.
+  Move a support thread between open/pending/resolved and optionally post the system line marking the transition. The one to call for pending, which has no dedicated wrapper.
 ### factory
 - create_direct — stapel_chat.services.create_direct
   instead of: stapel_chat.models.Conversation.objects.get_or_create
-  Get-or-create the 1:1 thread between two users — idempotent by an order-independent direct_key over (scope_key, both ids), with the create race decided by the partial unique constraint (the loser returns the winner's row). Reach for this instead of your own get_or_create over a participant pair: a hand-rolled one has nothing unique to key on and quietly hands the two users two different threads.
+  Get-or-create the 1:1 thread between two users — idempotent by an order-independent key over (scope, both ids), with the create race decided by a partial unique constraint. A hand-rolled get_or_create has nothing unique to key on and quietly hands the two users two different threads.
 - create_group — stapel_chat.services.create_group
   instead of: stapel_chat.models.Conversation.objects.create
-  Create a group thread and seed its participant rows in the same call (owner first, ids deduped, conflicts ignored). Group threads are deliberately never deduplicated — each call is a new conversation. A Conversation row created by hand has no participants, and the list endpoint filters on participants__user, so nobody can see it.
+  Create a group thread and seed its participant rows in one call (owner first, ids deduped). A Conversation row created by hand has no participants, and the list endpoint filters on participants — so nobody can see it.
 - create_support — stapel_chat.services.create_support
   instead of: stapel_chat.models.Conversation.objects.create
-  Open a support thread for a customer — unassigned, support_status=open, customer seeded as the participant, which is exactly the shape support_queue() selects on. Call it from an order/ticket flow instead of writing the row: a support conversation with a blank status or no participant is one no operator will ever be shown.
+  Open a support thread for a customer — unassigned, status open, customer seeded as participant, which is exactly the shape the queue selects on. A support conversation with a blank status or no participant is one no operator will ever be shown.
+- journal_rows — stapel_chat.services.journal_rows
+  The replay source a resuming socket reads: rows past the client's cursor by REVISION sequence. Filtering on the message's own seq is the bug this exists to prevent — it silently drops every edit and tombstone that happened while the client was away.
 - post_message — stapel_chat.services.post_message
   instead of: stapel_chat.models.Message.objects.create
-  THE send path, and the only sanctioned way a message comes into being: allocates the next per-conversation seq under a select_for_update row lock, persists the row and writes the chat.message outbox event in ONE transaction (mutate_and_emit), schedules best-effort realtime fan-out on_commit, retries on a seq collision. Inserting a Message with a seq you chose yourself bypasses the counter, breaks the gapless total order that anchor-paginated history and realtime resume both anchor on, and emits nothing at all.
+  THE send path, and the only sanctioned way a message comes into being: allocates the next seq under a row lock, persists the row and the chat.message outbox event in ONE transaction, normalizes and CDN-enriches the attachments once, fans out to the sockets on commit, and returns the existing row when a client_msg_id is retried. Inserting a Message with your own seq bypasses the counter, breaks the order history paging and realtime resume both anchor on, emits nothing, and reaches no open socket.
 - support_queue — stapel_chat.services.support_queue
-  The operator queue as a queryset: unassigned support conversations still open or pending, oldest first. Pass qs= to pre-scope it (typically the SCOPE_PROVIDER filter) rather than re-deriving the filter — "what is still waiting for an operator" is policy, and a second copy of it drifts from the one assign_operator enforces.
+  The operator queue as a queryset: unassigned support threads still open or pending, oldest first. Pass qs= to pre-scope it rather than re-deriving the filter — a second copy of "what is still waiting" drifts from the one assign_operator enforces.
 - unread_count — stapel_chat.services.unread_count
   instead of: stapel_chat.models.Message.objects.count
-  Messages past a participant's marker that somebody else authored — system lines (null sender) and the participant's own messages are excluded, and that exclusion is the whole difference from a naive count: a hand-rolled seq__gt count lights the badge for your own message and for every "operator assigned" system line.
+  Messages past a participant's marker that somebody else authored — system lines, your own messages and tombstones excluded. A naive seq__gt count lights the badge for your own message, for every system line, and for a message deleted before you got to it: a badge nobody can clear.
 
 ## Extension points — what a product replaces, fork-free
+- ACTIVITY_STATES [merge_registry]
+  The OPEN activity registry — typing, recording audio, sending video, uploading file, idle — with the same merge semantics. "Choosing a sticker" is a settings line.
+- ATTACHMENT_TYPES [merge_registry]
+  The OPEN attachment-type registry — builtins (image, gif, video, voice, file) merged under the setting and then under register_attachment_type(), later wins, None removes. Stickers are the named next type: adding one is a settings line, not a contract change.
 - SCOPE_PROVIDER [dotted_path]
   Swap how the opaque scope_key (workspace/org/tenant) is resolved from the request and enforced on querysets — the default is a single global scope; a host may return the active workspace_id so conversations are partitioned per tenant.
 - chat.message [comm_event]
   Emitted (transactionally, via the outbox) whenever a message is appended. Realtime delivery, search indexing and notifications subscribe without any coupling in the engine.
+- chat.message.deleted [comm_event]
+  Emitted when a message becomes a tombstone. The row is not removed — the id keeps being delivered, stripped, so every client cache learns which one to purge.
+- chat.message.edited [comm_event]
+  Emitted when an author replaces a message body. Carries a fresh revision sequence, which is what makes the edit reachable by a client that was offline when it happened.
 - chat.support.assigned [comm_event]
   Emitted when a support conversation is claimed by an operator — routing and operator-notification layers subscribe.
 - serializer_seams [class_override]
@@ -59,16 +95,20 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
 
 ## Fits with — fleet dependencies
 - stapel-auth (optional) — every endpoint requires an authenticated user (IsAuthenticated); stapel-auth is the shelf's session issuer — any stapel-core-compatible JWT issuer satisfies the check
-- stapel-cdn (optional) — messages carry opaque attachment keys only; a file/CDN module (or any host storage) owns the bytes those keys point at
+- stapel-cdn (optional) — attachment render metadata — chat calls cdn.describe by comm to denormalize aspect, byte size, the 16px micro-thumbnail, video poster and duration, and the voice waveform, once, at send time. Optional: without it a message still sends carrying whatever the client supplied.
 - stapel-core (required) — comm bus (chat.message / chat.support.assigned emits via the outbox), JWT authentication (HTTP + optional Channels), AppSettings config layer, anchor pagination
+- stapel-realtime (required) — the WebSocket substrate — both consumers, the v1 wire envelope, the stream-key canon, the fail-closed authorize seam, the close-code set and the origin guard. Not optional: realtime is the canonical path, and chat previously carried its own duplicate socket implementation.
 
-## HTTP operations (10) — call by operationId, never by a typed path
+## HTTP operations (13) — call by operationId, never by a typed path
 Paths are relative to `/chat/api/v1/`.
 ### Chat
+- POST /conversations/{conversation_id}/activity — chat_api_v1_conversations_activity_create
 - POST /conversations — chat_api_v1_conversations_create
 - GET /conversations — chat_api_v1_conversations_list
 - POST /conversations/{conversation_id}/messages — chat_api_v1_conversations_messages_create
+- DELETE /conversations/{conversation_id}/messages/{message_id} — chat_api_v1_conversations_messages_destroy
 - GET /conversations/{conversation_id}/messages — chat_api_v1_conversations_messages_list
+- PATCH /conversations/{conversation_id}/messages/{message_id} — chat_api_v1_conversations_messages_partial_update
 - POST /conversations/{conversation_id}/read — chat_api_v1_conversations_read_create
 - GET /conversations/{conversation_id} — chat_api_v1_conversations_retrieve
 ### Chat support
@@ -77,7 +117,7 @@ Paths are relative to `/chat/api/v1/`.
 - POST /support/conversations/{conversation_id}/resolve — chat_api_v1_support_conversations_resolve_create
 - GET /support/queue — chat_api_v1_support_queue_list
 
-## Error codes (54) — the StapelError envelope
+## Error codes (61) — the StapelError envelope
 Render `t(code, params)`; branch UX on the remediation. Localized text lives in docs/errors.<lang>.md, not here.
 - error.400.bad_request [400] fix_input
 - error.400.captcha_invalid [400] retry
@@ -85,11 +125,16 @@ Render `t(code, params)`; branch UX on the remediation. Localized text lives in 
 - error.400.chat_attachments_disabled [400] fix_input
 - error.400.chat_body_too_long [400] fix_input
 - error.400.chat_empty_message [400] fix_input
+- error.400.chat_invalid_attachment [400] fix_input
 - error.400.chat_invalid_direct [400] fix_input
 - error.400.chat_invalid_kind [400] fix_input
 - error.400.chat_invalid_reply [400] fix_input
 - error.400.chat_kind_disabled [400] fix_input
+- error.400.chat_message_deleted [400] fix_input
+- error.400.chat_not_editable [400] fix_input
 - error.400.chat_not_support [400] fix_input
+- error.400.chat_unknown_activity_state [400] fix_input
+- error.400.chat_unknown_attachment_type [400] fix_input
 - error.400.expected_list [400] fix_input
 - error.400.field.blank [400] fix_input {field}
 - error.400.field.does_not_exist [400] fix_input {field}
@@ -108,6 +153,7 @@ Render `t(code, params)`; branch UX on the remediation. Localized text lives in 
 - error.400.verification_invalid_factor [400] verify
 - error.401.unauthorized [401] reauthenticate
 - error.402.payment_required [402] retry
+- error.403.chat_not_author [403] retry
 - error.403.chat_not_operator [403] retry
 - error.403.chat_not_participant [403] retry
 - error.403.forbidden [403] retry
@@ -116,6 +162,7 @@ Render `t(code, params)`; branch UX on the remediation. Localized text lives in 
 - error.403.verification_required [403] verify
 - error.404.ad_not_found [404] retry
 - error.404.chat_conversation_not_found [404] retry
+- error.404.chat_message_not_found [404] retry
 - error.404.not_found [404] retry
 - error.404.verification_challenge_not_found [404] verify
 - error.405.method_not_allowed [405] retry

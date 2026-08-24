@@ -44,13 +44,19 @@ class TestSend:
         assert r.json()["localizable_error"] == "error.400.chat_body_too_long"
 
     def test_attachment_only_message_ok(self, auth_client, user, other_user):
+        """A bare ref string is the pre-0.3 form and still sends — it just
+        comes back as a normalized descriptor, typed ``file``, with the render
+        fields null because nothing can invent an aspect ratio for it."""
         conv = self._direct(user, other_user)
         r = auth_client.post(
             f"/chat/api/v1/conversations/{conv.id}/messages",
             {"body": "", "attachments": ["chat/abc123"]}, format="json",
         )
         assert r.status_code == 201
-        assert r.json()["attachments"] == ["chat/abc123"]
+        [attachment] = r.json()["attachments"]
+        assert attachment["key"] == "chat/abc123"
+        assert attachment["type"] == "file"
+        assert attachment["aspect"] is None
 
     def test_attachments_disabled_rejected(self, auth_client, user, other_user, settings):
         settings.STAPEL_CHAT = {"ATTACHMENTS": False}

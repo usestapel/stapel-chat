@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "chat.message",
-  "description": "A message was appended to a conversation, written into the outbox in the same transaction as the row. Realtime consumers deliver it; downstreams (search index, notifier) subscribe. Ordered by the monotonic per-conversation seq.",
+  "description": "A message was appended to a conversation, written into the outbox in the same transaction as the row. Downstreams (search index, notifier) subscribe. `seq` is the message's position in the thread and never changes; `rev_seq` is its position in the conversation's revision journal and is re-allocated on every edit/delete — realtime replay anchors on rev_seq, sorting anchors on seq.",
   "type": "object",
-  "required": ["message_id", "conversation_id", "seq", "kind", "created_at"],
+  "required": ["message_id", "conversation_id", "seq", "rev_seq", "kind", "created_at"],
   "properties": {
     "message_id":        { "type": "string", "format": "uuid" },
     "conversation_id":   { "type": "string", "format": "uuid" },
@@ -11,10 +11,39 @@
     "scope_key":         { "type": "string" },
     "sender_id":         { "type": ["string", "null"] },
     "seq":               { "type": "integer", "minimum": 1 },
+    "rev_seq":           { "type": "integer", "minimum": 1 },
     "kind":              { "type": "string", "enum": ["text", "system"] },
     "body":              { "type": "string" },
     "reply_to":          { "type": ["string", "null"] },
-    "attachments":       { "type": "array", "items": { "type": "string" } },
+    "client_msg_id":     { "type": ["string", "null"] },
+    "edited":            { "type": "boolean" },
+    "edited_at":         { "type": ["string", "null"], "format": "date-time" },
+    "deleted":           { "type": "boolean" },
+    "deleted_at":        { "type": ["string", "null"], "format": "date-time" },
+    "attachments": {
+      "type": "array",
+      "description": "Render descriptors. `type` is an OPEN registry (image/gif/video/voice/file out of the box, plus whatever the host registered), not a closed enum.",
+      "items": {
+        "type": "object",
+        "required": ["key", "type"],
+        "properties": {
+          "key":          { "type": "string", "description": "Opaque CDN ref, <type>/<hash>" },
+          "type":         { "type": "string" },
+          "mime":         { "type": ["string", "null"] },
+          "bytes":        { "type": ["integer", "null"] },
+          "name":         { "type": ["string", "null"] },
+          "ext":          { "type": ["string", "null"] },
+          "width":        { "type": ["integer", "null"] },
+          "height":       { "type": ["integer", "null"] },
+          "aspect":       { "type": ["number", "null"] },
+          "duration_ms":  { "type": ["integer", "null"] },
+          "preview_b64":  { "type": ["string", "null"], "description": "~16px webp micro-thumbnail (or video poster) as a data: URI" },
+          "waveform_b64": { "type": ["string", "null"], "description": "Voice-message waveform image as a data: URI" },
+          "variants":     { "type": ["array", "null"], "items": { "type": "object" } }
+        },
+        "additionalProperties": true
+      }
+    },
     "created_at":        { "type": "string", "format": "date-time" }
   },
   "additionalProperties": true
