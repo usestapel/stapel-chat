@@ -4,7 +4,31 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-08-24
+## [0.3.1] - 2026-08-24
+
+### Fixed — 0.3.0's tag could not be installed
+
+The `v0.3.0` tag never reached PyPI. `stapel-realtime` 0.1.1 declared
+`stapel-core>=0.33.2,<0.34` — the standard one-minor window, and the wrong
+discipline for a substrate every socket-serving module builds on, because its
+ceiling becomes theirs. 0.3.0 raised its core floor to `>=0.41.0` for the
+canonical serializer seam, and the pair was unresolvable:
+
+```
+stapel-chat 0.3.0 depends on stapel-core<1.0 and >=0.41.0
+stapel-realtime 0.1.1 depends on stapel-core<0.34 and >=0.33.2
+ERROR: ResolutionImpossible
+```
+
+Fixed upstream in **stapel-realtime 0.1.2** (ceiling widened to `<1.0`; no code
+change, its 193 tests pass unmodified against core 0.43 — the frame-type
+equality test, not a version range, is what guards that seam). This release
+raises the floor to `stapel-realtime>=0.1.2` accordingly.
+
+0.3.1 is 0.3.0 plus that one-line floor. **Everything in the 0.3.0 entry below
+describes this release** — read it as the upgrade note.
+
+## [0.3.0] - 2026-08-24 — *tagged but never published; see 0.3.1*
 
 ### ⚠️ BREAKING — the WebSocket wire, the attachment shape, and the boot gate
 
