@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-chat"
-version = "0.2.2"
+version = "0.2.3"
 description = "Conversations, messaging and support chat for the Stapel framework"
 readme = "README.md"
 license = { text = "MIT" }
@@ -24,11 +24,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # Floor: 0.27.0 ships django/scope.py — MandateScopeMixin and
-    # check_shipped_scope_provider, which `can_operate` and the system checks
-    # are built on — and owns error.503.mandate_unavailable in the committed
-    # errors.json. (The `owner` field itself arrived in 0.26.0.)
-    "stapel-core>=0.27.0,<1.0",
+    # Floor: 0.36.0 fixes AnchorPagination's direction=prev bug — history
+    # paging relies on the fixed semantics.
+    "stapel-core>=0.36.0,<1.0",
 ]
 
 [project.urls]
@@ -41,8 +39,8 @@ Issues = "https://github.com/usestapel/stapel-chat/issues"
 [project.optional-dependencies]
 # Realtime delivery is optional — the module is correct (replay by seq) without
 # it. Install to run the Channels consumer (stapel_chat.consumers.ChatConsumer).
-channels = ["stapel-core[channels]>=0.27.0,<1.0"]
-all = ["stapel-core[channels]>=0.27.0,<1.0"]
+channels = ["stapel-core[channels]>=0.36.0,<1.0"]
+all = ["stapel-core[channels]>=0.36.0,<1.0"]
 
 [tool.setuptools]
 package-dir = {"stapel_chat" = "."}

@@ -118,7 +118,7 @@ class TestHistoryAnchorWindows:
             f"/chat/api/v1/conversations/{conv.id}/messages?anchor=2&direction=prev&limit=2"
         )
         seqs = [m["seq"] for m in r.json()["items"]]
-        assert len(seqs) == 2 and all(s > 2 for s in seqs)
+        assert seqs == [4, 3]
 
     def test_anchor_is_stable_under_insertion(self, auth_client, user, other_user):
         conv = self._seeded(user, other_user)
