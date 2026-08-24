@@ -169,6 +169,7 @@ environment variable -> default. Read lazily at call time.
 | `MAX_ATTACHMENTS` | `10` | Attachments per message | **axis** (int) |
 | `MAX_PREVIEW_B64_BYTES` | `8192` | Ceiling on an inline `data:` preview | **axis** (int) |
 | `EDIT_WINDOW_S` | `0` | Seconds an author may still edit (0 = forever) | **axis** (int) |
+| `MODERATION_TARGET_TYPE` | `"chat_message"` | The stapel-moderation target registered for messages (`""` = none) | **axis** (enum) |
 | `SCOPE_PROVIDER` | `stapel_chat.scope.DefaultScopeProvider` | Scope resolution/filtering | replace (dotted path) |
 
 **There is no realtime key.** See *Why there is no realtime switch*.
@@ -267,6 +268,48 @@ broken image in every consumer) and again here by `MAX_PREVIEW_B64_BYTES`,
 which matches it deliberately. `MAX_ATTACHMENTS` × that is the per-message
 preview weight a client pays for.
 
+### 7. Moderation — one target type, registered into a gap (`moderation.py`)
+
+stapel-moderation is target-generic: its target registry ships EMPTY and it
+learns what a "chat message" is from whoever knows. Nobody did, so until 0.5.0
+the only way to complain about a message in the fleet was stapel-classified's
+**evidence-based** `chat_message` policy — the reporter's own screenshot,
+marked unverified, because no module served the content. This module stores
+every message it delivers, so that was never the truth.
+
+- `chat.moderation_content` (a comm Function) answers with the message as it
+  is **now** — an edit after the complaint is what a moderator reads. Its
+  `message_id` is either a bare id or the composite `<conversation_id>:<message_id>`
+  stapel-classified names a message by (so that *who* may report it is
+  answerable off that package's own conversation table — nobody can answer it
+  from a message id alone). Given the composite form both halves must agree.
+- `MESSAGE_TARGET_POLICY` is the policy registered for `chat_message`:
+  `gate: "post"`, no intake topic (a case per message would screen every
+  conversation in the deployment — cases here are opened by REPORTS),
+  `id_field: "message_id"`, `verdict_event: None`, `media: False`, and the
+  universal reason taxonomy minus the codes that are about goods.
+- Registration happens at `ready()` **only into a gap**: a host that already
+  declared the type keeps its own policy, because the runtime registry layer
+  outranks settings and overwriting it would silently replace a composite's
+  deliberate reasons list. `MODERATION_TARGET_TYPE = ""` registers nothing,
+  and without stapel-moderation installed nothing here runs.
+
+**A tombstone is gone, not empty.** A deleted or GDPR-erased message has an
+empty body by construction; the function raises `MessageNotFound` (a
+`LookupError`, the family's documented contract) so moderation renders
+`target_not_found` rather than a blank card indistinguishable from a message
+that said nothing. That is also what keeps a moderation case from becoming
+the one place erased text survives.
+
+**There is no verdict consumer, and no conversation target.** `verdict_event`
+is an explicit `None` — a statement stapel-moderation announces as `W006`,
+not an omission. Chat does not take a message down on a verdict: deletion
+here is an author's act and a tombstone that travels to every client, and
+wiring a moderator's verdict into it is a product decision with a
+notification and an appeal attached. A complaint about a *thread* is a
+complaint about the messages in it; each card carries its `conversation_id`
+so the context is one click away.
+
 ### Events (comm surface)
 
 | Kind | Name | Payload | Schema |
@@ -276,6 +319,7 @@ preview weight a client pays for.
 | Emit | `chat.message.deleted` | `{message_id, conversation_id, seq, rev_seq, deleted_at, …}` | `schemas/emits/chat.message.deleted.json` |
 | Emit | `chat.support.assigned` | `{conversation_id, operator_id, scope_key}` | `schemas/emits/chat.support.assigned.json` |
 | Consume | `user.deleted` | `{user_id, ...}` | `schemas/consumes/user.deleted.json` |
+| Function | `chat.moderation_content` | in `{message_id}` → out `{text, title, language, media[], author_id, url, kind, conversation_id, conversation_kind, scope_key, seq, edited, created_at}` | `schemas/functions/chat.moderation_content.json` |
 | Signal | `chat.read` | `{conversation_id, user_id, last_read_seq}` | ephemeral — no schema, no outbox |
 | Signal | `chat.delivered` | `{conversation_id, user_id, last_delivered_seq}` | ephemeral |
 | Signal | `chat.activity` | `{conversation_id, user_id, state, ttl_s}` | ephemeral |

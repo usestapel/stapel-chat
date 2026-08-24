@@ -1,3 +1,9 @@
+def _optional_test_apps() -> tuple:
+    from importlib.util import find_spec
+
+    return ("stapel_moderation",) if find_spec("stapel_moderation") else ()
+
+
 def pytest_configure(config):
     from django.conf import settings
     if not settings.configured:
@@ -6,7 +12,10 @@ def pytest_configure(config):
         # never drift (contract-pipeline.md §3).
         from stapel_chat._codegen_settings import settings_kwargs
 
-        settings.configure(**settings_kwargs())
+        # stapel-moderation is an OPTIONAL dependency of this module (see
+        # moderation.py); the tests install it so the seam is proven against
+        # the real queue rather than a stand-in for it.
+        settings.configure(**settings_kwargs(extra_apps=_optional_test_apps()))
         import django
         django.setup()
 

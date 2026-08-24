@@ -166,6 +166,7 @@ def test_capabilities_axes():
         "MAX_PREVIEW_B64_BYTES",
         "ACTIVITY_STATES",
         "EDIT_WINDOW_S",
+        "MODERATION_TARGET_TYPE",
     }
     assert axes["CHAT_KINDS"]["kind"] == "list"
     assert axes["ATTACHMENTS"]["kind"] == "bool"

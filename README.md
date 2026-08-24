@@ -24,12 +24,12 @@ pip install stapel-chat
 
 | Fact | Value |
 |---|---|
-| Version | `0.4.0` |
+| Version | `0.5.0` |
 | Python | `>=3.11` (3.11, 3.12, 3.13, 3.14) |
 | HTTP operations | 13 |
-| Config axes | 9 |
-| Usage surface | 17 |
-| Extension points | 8 |
+| Config axes | 10 |
+| Usage surface | 18 |
+| Extension points | 9 |
 | Error codes | 61 |
 | Fleet dependencies | [`stapel-auth`](https://github.com/usestapel/stapel-auth) (optional) · [`stapel-cdn`](https://github.com/usestapel/stapel-cdn) (optional) · [`stapel-core`](https://github.com/usestapel/stapel-core) · [`stapel-realtime`](https://github.com/usestapel/stapel-realtime) |
 

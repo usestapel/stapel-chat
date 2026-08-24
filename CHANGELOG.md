@@ -4,6 +4,55 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-24
+
+### Added — a message can be reported, and the report is about the message
+
+stapel-moderation is target-generic: its target registry ships EMPTY and it
+learns what a "chat message" is from whoever knows. Nobody did. The only way
+to complain about a message anywhere in the fleet was stapel-classified's
+**evidence-based** `chat_message` policy — the reporter's own screenshot,
+carried in the report and stamped unverified, because no module served a
+message's content. This module stores every message it delivers, so that was
+never the truth; it was a gap wearing a workaround.
+
+- **`chat.moderation_content`** (comm Function, `schemas/functions/`) — one
+  message's live content for an external moderation module: body, attachment
+  KEYS, author, and the conversation it came from. Fetched when it is looked
+  at, so a case opened hours ago shows the message as it is now, edits
+  included. `services.moderation_content` is the same call in-process.
+- **`stapel_chat.moderation`** — `MESSAGE_TARGET_POLICY` (the `chat_message`
+  policy: `gate: "post"`, no intake topic, `id_field: "message_id"`,
+  `verdict_event: None`, `media: False`, the universal taxonomy minus the
+  codes that describe goods) and `register_moderation_target()`, called from
+  `apps.ready()`.
+- **`MODERATION_TARGET_TYPE`** (default `"chat_message"`, `""` disables) — a
+  config axis, curated in `docs/capabilities.meta.json`.
+
+**Registered only into a gap.** stapel-moderation's runtime registry layer
+outranks settings, so registering unconditionally would silently overwrite a
+composite's deliberate policy — stapel-classified declares this very type.
+A host declaration always wins; ours fills a hole. Without stapel-moderation
+installed nothing here runs: it is not a dependency in either direction.
+
+**A tombstone is gone, not empty.** A deleted or GDPR-erased message has an
+empty body by construction, and handing that back would show a moderator a
+blank card indistinguishable from a message that said nothing. The new
+`services.MessageNotFound` (a `LookupError` — the `*.moderation_content`
+family's documented contract) makes moderation answer `target_not_found`
+instead, which is also what stops a moderation case from becoming the one
+place erased text survives.
+
+There is deliberately **no verdict consumer and no conversation target** — see
+MODULE.md §7 for why each is a statement rather than an omission.
+
+### Changed
+
+- `_codegen_settings.settings_kwargs(extra_apps=…)` — test-harness only, so
+  the seam is exercised against the real queue instead of a stand-in. The
+  contract harness never passes it: a co-mounted module would put its error
+  keys in this module's emitted catalogue.
+
 ## [0.4.0] - 2026-08-24
 
 ### ⚠️ BREAKING — chat and the CDN now speak one vocabulary instead of two

@@ -63,6 +63,11 @@
       "name": "chat.message.deleted",
       "kind": "comm_event",
       "summary": "Emitted when a message becomes a tombstone. The row is not removed — the id keeps being delivered, stripped, so every client cache learns which one to purge."
+    },
+    {
+      "name": "MODERATION_TARGET_TYPE",
+      "kind": "merge_registry",
+      "summary": "The stapel-moderation target type registered for chat messages (chat_message) when that module is installed and no host declared the type first — the host's declaration always wins."
     }
   ],
   "surface_roots": [
@@ -169,6 +174,13 @@
       "instead_of": [
         "stapel_chat.models.Message.objects.delete"
       ]
+    },
+    "moderation_content": {
+      "kind": "gate_function",
+      "intent": "Read one message's live content for an external moderation module — body, attachment KEYS, author, conversation. Fetched when it is looked at, so a card shows the message as it is now; a deleted or erased message raises MessageNotFound instead of answering with the empty body a tombstone leaves, because a blank card looks exactly like a message that said nothing.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.get"
+      ]
     }
   },
   "axes": {
@@ -216,6 +228,11 @@
       "business_label": "How long a message stays editable",
       "summary": "Seconds after posting during which the author may still correct their own message. Zero — the default — means there is no deadline. Deleting is unaffected: a message can always be taken back, and taking it back leaves a tombstone rather than a hole.",
       "behavior": "An edit after the window is rejected (400); 0 disables the deadline entirely."
+    },
+    "MODERATION_TARGET_TYPE": {
+      "business_label": "Whether members can report chat messages",
+      "summary": "The stapel-moderation target type registered for chat messages. \"chat_message\" (the default) makes a message reportable: a complaint opens a case on the real message, read through chat.moderation_content, instead of on the reporter's screenshot. \"\" registers nothing.",
+      "behavior": "Registered at app-ready and only into a GAP — a host that already declared this type keeps its own policy, since the runtime layer outranks settings. Without stapel-moderation installed the setting has no effect."
     }
   }
 }

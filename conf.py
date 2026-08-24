@@ -39,6 +39,9 @@ CTO-facing config axes (capability-config.md §16):
   audio", …), same merge semantics. "Choosing a sticker" is a settings line.
 - ``EDIT_WINDOW_S`` — how long after posting an author may still edit their
   own message. ``0`` means forever.
+- ``MODERATION_TARGET_TYPE`` — the stapel-moderation target type registered
+  for chat messages, when that module is installed and no host has declared
+  the type itself. ``""`` registers nothing.
 """
 from stapel_core.conf import AppSettings
 
@@ -85,6 +88,12 @@ DEFAULTS = {
     "MAX_PREVIEW_B64_BYTES": 4096,
     # Seconds an author may still edit their own message. 0 = no window.
     "EDIT_WINDOW_S": 0,
+    # The stapel-moderation target type this module registers for its own
+    # messages when stapel-moderation is installed AND no host has declared
+    # that type already (moderation.py). "" registers nothing: a deployment
+    # that wants complaints about messages handled somewhere else, or not at
+    # all, says so here rather than by uninstalling a dependency.
+    "MODERATION_TARGET_TYPE": "chat_message",
     # Dotted path to a ScopeProvider — resolves the opaque scope_key from a
     # request and filters querysets by it. The default is a no-op (single
     # global scope); a host may return e.g. the active workspace_id.

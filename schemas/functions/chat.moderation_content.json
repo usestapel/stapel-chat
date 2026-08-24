@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "chat.moderation_content",
+  "description": "A message's content, for an external moderation module's screening and moderator card. Identifiers travel on the bus; the content is fetched by this call at the moment it is looked at, so a case opened hours ago shows the message as it is now, edits included. A moderation policy names this function as its `content_function` for the `chat_message` target type (see stapel_chat/moderation.py). Response: {\"text\", \"title\", \"language\", \"media\", \"author_id\", \"url\", \"kind\", \"conversation_id\", \"conversation_kind\", \"scope_key\", \"seq\", \"edited\", \"created_at\"} — a conversation has no title and a message no declared language or public URL, so those come back empty rather than invented; `media` carries the attachment KEYS (opaque CDN handles, not bytes). A deleted or erased message raises a LookupError: a tombstone is gone, not empty, and a blank card is indistinguishable from a message that said nothing. Unguarded by design: who may read a case's content is the moderation module's `can_view_content` policy to answer.",
+  "type": "object",
+  "required": ["message_id"],
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "description": "The moderation case's `target_key` for a `chat_message` target: either a bare message id, or the composite `<conversation_id>:<message_id>` a composite uses so that WHO may report a message is answerable off its own conversation table. Given the composite form both halves must agree, or the message is not this target."
+    }
+  },
+  "additionalProperties": false
+}

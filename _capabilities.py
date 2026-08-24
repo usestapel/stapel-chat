@@ -21,6 +21,8 @@ def main(argv=None):
     #   ACTIVITY_STATES       (open registry) — typing/recording/uploading + …
     #   ATTACHMENT_METADATA   (enum) — cdn.describe, or trust the client
     #   MAX_ATTACHMENTS / MAX_PREVIEW_B64_BYTES / EDIT_WINDOW_S (int limits)
+    #   MODERATION_TARGET_TYPE (enum) — whether a message is reportable, and
+    #                                 under which stapel-moderation target
     #
     # There is deliberately NO realtime axis: the socket is the path, and a
     # deployment that cannot serve one fails manage.py check rather than
@@ -36,6 +38,7 @@ def main(argv=None):
         "MAX_ATTACHMENTS",
         "MAX_PREVIEW_B64_BYTES",
         "EDIT_WINDOW_S",
+        "MODERATION_TARGET_TYPE",
     }
     return run_capabilities_cli(
         argv,
@@ -55,6 +58,7 @@ def main(argv=None):
                 "MAX_BODY_LENGTH": "chat.limits",
                 "MAX_PREVIEW_B64_BYTES": "chat.limits",
                 "EDIT_WINDOW_S": "chat.limits",
+                "MODERATION_TARGET_TYPE": "chat.moderation",
             }
         ),
         prog="stapel-chat-capabilities",

@@ -17,7 +17,14 @@ PYTHON ?= python3
 # takes a fresh revision sequence and why a delete leaves a row behind. Those are
 # exactly the sentences an agent reading this file needs. Trim before raising it
 # again.
-LLMS_BUDGET ?= 4600
+# Raised again in 0.5.0, from 4600, by 200: the moderation seam is a new
+# fleet-visible surface (a comm Function, a registered target type, a config
+# axis) and the lines that would have to go to fit 4600 are its two
+# load-bearing rules — that a tombstone reads as GONE rather than as an empty
+# body, and that the type is registered only into a gap so a composite's own
+# policy is never overwritten. An agent that reads neither writes the bug.
+# Trim before raising it again.
+LLMS_BUDGET ?= 4800
 
 .PHONY: contract contract-check
 

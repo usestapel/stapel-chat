@@ -23,11 +23,18 @@ def settings_kwargs(
     *,
     root_urlconf: str = "stapel_chat.tests.urls",
     contract: bool = False,
+    extra_apps: tuple = (),
 ) -> dict:
     """Return the ``settings.configure(**kwargs)`` for a single-module chat
     instance. ``contract=True`` swaps in the production ``REST_FRAMEWORK`` (the
     canonical stapel-core config) so the emitted schema is byte-identical to a
-    real host's."""
+    real host's.
+
+    ``extra_apps`` is for the TEST harness only, and today holds exactly one
+    thing: ``stapel_moderation``, so the moderation seam can be exercised
+    against the real queue instead of a mock of it. The contract harness never
+    passes it — a co-mounted module would put its error keys in this module's
+    emitted catalogue."""
     if contract:
         rest_framework = {
             "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -64,6 +71,7 @@ def settings_kwargs(
             # its AppConfig.ready() — the same two lines a host writes.
             "stapel_realtime",
             "stapel_chat",
+            *extra_apps,
         ],
         AUTH_USER_MODEL="users.User",
         DATABASES={

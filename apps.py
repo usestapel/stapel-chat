@@ -22,6 +22,14 @@ class ChatConfig(AppConfig):
         from . import errors  # noqa: F401
         from . import functions  # noqa: F401
 
+        # Moderation: declare what a "chat message" is to a target-generic
+        # queue — but only into a gap. A host that declared the type itself
+        # (the stapel-classified preset does) keeps its own policy, because
+        # the runtime registry layer would otherwise overwrite settings.
+        from .moderation import register_moderation_target
+
+        register_moderation_target()
+
         # GDPR: register the per-app data handler (monolith in-process mode).
         from stapel_core.gdpr import gdpr_registry
 

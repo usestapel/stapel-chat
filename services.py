@@ -16,6 +16,7 @@ the durable rows by ``seq``.
 """
 from __future__ import annotations
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from stapel_core.comm import mutate_and_emit
@@ -62,6 +63,17 @@ class NotAuthor(ChatError):
 
 class MessageGone(ChatError):
     """The message is already a tombstone — there is nothing left to change."""
+
+
+class MessageNotFound(LookupError):
+    """No such message — or nothing left of it.
+
+    A ``LookupError``, which is the documented contract of the
+    ``*.moderation_content`` family: an external moderation module tells
+    "the target is gone" (404) from "the owner could not answer" (503) by
+    this exception's type, and answering 503 for a message that no longer
+    exists would park a case waiting for a row that is never coming back.
+    """
 
 
 class NotEditable(ChatError):
@@ -601,3 +613,97 @@ def reopen_support(*, conversation: Conversation) -> Conversation:
         status=SupportStatus.OPEN,
         system_marker="chat.support.reopened",
     )
+
+
+# ── Moderation seam (read half) ─────────────────────────────────────────
+
+
+#: How stapel-classified names a chat message to stapel-moderation:
+#: ``<conversation_id>:<message_id>``. The conversation half is not
+#: decoration — it is what lets THAT package answer, off its own join table,
+#: whether the reporter was in the thread; nobody can answer it from a bare
+#: message id. This module accepts either spelling and, given the composite
+#: one, checks that the halves agree.
+MESSAGE_KEY_SEPARATOR = ":"
+
+
+def _split_message_key(target_key) -> tuple:
+    """``"<conversation_id>:<message_id>"`` -> (conversation_id, message_id).
+
+    A bare id comes back as ``("", id)`` — both spellings are served, because
+    the composite key is a composite's convention and a deployment without
+    that composite has no conversation half to send.
+    """
+    text = str(target_key or "")
+    if MESSAGE_KEY_SEPARATOR not in text:
+        return "", text
+    conversation_id, _, message_id = text.rpartition(MESSAGE_KEY_SEPARATOR)
+    return conversation_id, message_id
+
+
+def moderation_content(message_id) -> dict:
+    """Return ``message_id``'s content for an external moderation module.
+
+    The read half of the moderation seam, the ``*.moderation_content`` family
+    (`listings.moderation_content`, `reviews.moderation_content`): identifiers
+    travel on the bus, the content is fetched at the moment it is looked at,
+    so a moderator opening a case hours later reads the message as it is now
+    — including an edit made after the complaint was filed.
+
+    **A tombstone is "gone", not "empty".** A deleted or erased message has
+    an empty body by construction, and handing that back would show a
+    moderator a blank card indistinguishable from a message that said
+    nothing. It raises :class:`MessageNotFound` instead, which the moderation
+    module renders as ``target_not_found`` — nothing is down, there is simply
+    nothing left to look at. That is also the right answer after a GDPR
+    erasure: the content is destroyed, and a moderation case must not become
+    the one place it survives.
+
+    ``message_id`` is either a bare message id or the composite key a
+    composite uses to name a message (:data:`MESSAGE_KEY_SEPARATOR`); given
+    the composite form, both halves must agree or the message is not this
+    target.
+
+    Attachment KEYS ride in ``media``; the module stores no bytes and the
+    keys are opaque, so a console resolves them through the host's CDN. The
+    ``chat_message`` policy therefore ships ``media: False`` — feeding opaque
+    keys to a vision screener would only buy a refusal.
+
+    Unguarded on purpose: this is a comm Function, and who may look at a
+    case's content is the moderation module's ``can_view_content`` policy to
+    answer, not a second gate here that would fail closed against it.
+    """
+    conversation_id, key = _split_message_key(message_id)
+    try:
+        message = (
+            Message.objects.select_related("conversation").filter(pk=key).first()
+        )
+    except (ValueError, ValidationError) as exc:
+        raise MessageNotFound(str(message_id)) from exc
+    if message is None or message.deleted_at is not None:
+        raise MessageNotFound(str(message_id))
+    conv = message.conversation
+    if conversation_id and str(conv.id) != conversation_id:
+        # The two halves of a composite key must agree. A message quoted
+        # under somebody else's conversation is not this target.
+        raise MessageNotFound(str(message_id))
+    return {
+        "text": message.body,
+        # A conversation has no title and a message has no declared language
+        # — empty rather than invented (the family's convention).
+        "title": "",
+        "language": "",
+        "media": [str(a.get("key") or "") for a in (message.attachments or []) if a],
+        # Null for a system line, which is exactly what makes "you cannot
+        # report your own content" and "sanction the right person"
+        # answerable — and unanswerable for a line nobody wrote.
+        "author_id": str(message.sender_id) if message.sender_id else "",
+        "url": "",
+        "kind": message.kind,
+        "conversation_id": str(conv.id),
+        "conversation_kind": conv.kind,
+        "scope_key": conv.scope_key,
+        "seq": message.seq,
+        "edited": message.edited_at is not None,
+        "created_at": message.created_at.isoformat(),
+    }
