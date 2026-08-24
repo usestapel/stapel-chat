@@ -86,12 +86,35 @@ class MessageKind(models.TextChoices):
     SYSTEM = "system", "System"
 
 
-def _direct_key(scope_key: str, user_a, user_b) -> str:
+def _direct_key(
+    scope_key: str,
+    user_a,
+    user_b,
+    subject_type: str = "",
+    subject_key: str = "",
+) -> str:
     """Canonical dedup key for a direct thread: order-independent over the
-    participant pair, namespaced by scope. Two users have exactly one direct
-    thread per scope regardless of who initiates."""
+    participant pair, namespaced by scope **and by the thread's subject**.
+
+    Through 0.5.x this hashed the pair alone, so one buyer and one seller
+    could hold exactly ONE thread no matter how many things they discussed —
+    and every consumer that needed "a conversation about *that*" had to keep
+    its own many-subjects-per-thread table to avoid rendering the wrong
+    header. The subject is part of a direct thread's identity now.
+
+    **The subject-less key is byte-identical to the old one.** The subject
+    segments are appended only when there is a subject, which is what lets
+    every conversation that already exists keep its identity and keep being
+    found by an unchanged ``create_direct`` call. No data migration, and no
+    silent duplicate of a live thread. See the 0.6.0 CHANGELOG entry for what
+    that means for a pair who already had a thread before their first
+    subject.
+    """
     a, b = sorted((str(user_a), str(user_b)))
-    return f"{scope_key}\x1f{a}\x1f{b}"
+    key = f"{scope_key}\x1f{a}\x1f{b}"
+    if subject_type or subject_key:
+        key = f"{key}\x1f{subject_type}\x1f{subject_key}"
+    return key
 
 
 class Conversation(models.Model):
@@ -102,9 +125,16 @@ class Conversation(models.Model):
     is gapless and monotonic even under concurrent sends.
 
     ``direct_key`` is set only for ``direct`` threads (the order-independent
-    participant-pair key) and is uniquely constrained *among direct threads*,
-    which is what makes direct creation idempotent. It is blank for group and
-    support threads (which are never deduplicated).
+    participant-pair-**and-subject** key) and is uniquely constrained *among
+    direct threads*, which is what makes direct creation idempotent. It is
+    blank for group and support threads (which are never deduplicated).
+
+    ``subject_type`` / ``subject_key`` say what the thread is ABOUT, as an
+    opaque pair this module never parses (moderation's ``(target_type,
+    target_key)`` idiom). Blank means "about nothing in particular", which is
+    every thread a generic chat opens. The type must be registered
+    (:mod:`stapel_chat.subjects`) at creation time, and its policy names the
+    comm Function that turns the key into a renderable card.
 
     ``support_status`` is meaningful only for ``support`` threads (blank
     otherwise). ``assigned_operator`` is the currently assigned agent (null =
@@ -117,8 +147,16 @@ class Conversation(models.Model):
     # library never interprets it; the SCOPE_PROVIDER seam resolves & filters.
     scope_key = models.CharField(max_length=255, blank=True, default="", db_index=True)
 
-    # Idempotency key for direct threads only (blank elsewhere). See _direct_key.
-    direct_key = models.CharField(max_length=600, blank=True, default="")
+    # Idempotency key for direct threads only (blank elsewhere). See
+    # _direct_key. Widened from 600 in 0.6.0 to hold the subject segments:
+    # scope (255) + two uuids + type (32) + key (255) + separators.
+    direct_key = models.CharField(max_length=900, blank=True, default="")
+
+    # What this thread is about — an opaque pair, never parsed here. Blank on
+    # a thread about nothing in particular, which is every thread a generic
+    # chat opens. See stapel_chat.subjects.
+    subject_type = models.CharField(max_length=32, blank=True, default="")
+    subject_key = models.CharField(max_length=255, blank=True, default="")
 
     # High-water mark of Message.seq in this thread (see class docstring).
     last_seq = models.PositiveBigIntegerField(default=0)
@@ -144,6 +182,11 @@ class Conversation(models.Model):
             models.Index(fields=["scope_key", "kind"], name="chat_conv_scope_kind"),
             models.Index(
                 fields=["kind", "support_status"], name="chat_conv_support_queue"
+            ),
+            # "every conversation about that listing" — the read a consumer
+            # makes when the subject itself changes (sold, withdrawn).
+            models.Index(
+                fields=["subject_type", "subject_key"], name="chat_conv_subject"
             ),
         ]
         constraints = [

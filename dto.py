@@ -145,6 +145,40 @@ class MessageResponse:
 
 
 @dataclass
+class SubjectResponse:
+    """What a conversation is about, and the card somebody else rendered.
+
+    The ``(type, key)`` pair is this module's; the ``card`` is not — it is
+    whatever the subject type's ``card_function`` answered, passed through
+    untouched. Chat does not know what a listing is and never will, so it
+    stores a name and asks the owner.
+
+    Attributes:
+        type: Registered subject type (``listing``, …).
+        key: Opaque key within that type.
+        card: The provider's card, or ``null`` when there is none to show.
+            Its shape belongs to the provider — a deleted subject typically
+            answers a ``gone`` card rather than nothing, so ``null`` here
+            means the card could not be obtained, not that the subject is
+            gone.
+        meta_status: ``ok`` / ``partial`` / ``missing`` — the attachment
+            vocabulary, for the same reason: a degraded header stays
+            renderable and says why.
+        meta_reason: ``subject_type_unregistered`` /
+            ``card_function_unreachable`` / ``card_function_failed`` /
+            ``card_missing``, or null when the status is ``ok``. A header that
+            could not be built says WHY rather than looking like a thread
+            about nothing.
+    """
+
+    type: str
+    key: str
+    card: Optional[Dict[str, Any]] = None
+    meta_status: str = "ok"
+    meta_reason: Optional[str] = None
+
+
+@dataclass
 class ConversationResponse:
     """A conversation (thread).
 
@@ -165,6 +199,10 @@ class ConversationResponse:
             silently defaulting to a timer.
         socket_path: Where to open it (``ws/chat/<id>``), relative to the
             deployment's WebSocket prefix.
+        subject: What the thread is about, with its rendered card inlined —
+            or ``null`` for a thread about nothing in particular, which is
+            every thread a generic chat opens. Resolved in ONE batched call
+            per subject type for a whole page, never one per conversation.
         participants: The conversation's participants.
         created_at: Creation time.
         updated_at: Last-activity time.
@@ -181,6 +219,7 @@ class ConversationResponse:
     stream_key: str = ""
     socket_path: str = ""
     assigned_operator_id: Optional[str] = None
+    subject: Optional[SubjectResponse] = None
     participants: List[ParticipantResponse] = field(default_factory=list)
 
 
@@ -197,12 +236,20 @@ class CreateConversationRequest:
             requesting user (no other participants).
         participant_ids: Other participants to add (the requesting user is
             always a participant).
+        subject_type: What this thread is about, by registered type. Supply
+            both subject fields or neither. **For a direct thread the subject
+            is part of the thread's identity**: the same pair asking about a
+            different subject get a different thread, where before 0.6.0 they
+            were folded into the one thread they were allowed to have.
+        subject_key: The opaque key within that type. Never parsed here.
         scope_key: Ignored — the scope is resolved server-side from the
             SCOPE_PROVIDER seam; present for symmetry only.
     """
 
     kind: str = "direct"
     participant_ids: List[str] = field(default_factory=list)
+    subject_type: str = ""
+    subject_key: str = ""
     scope_key: str = ""
 
 

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "chat.conversation.created",
+  "description": "A conversation was created — written into the outbox in the same transaction as the row, so a subscriber never sees a thread that did not commit. Emitted ONLY on a real create: `create_direct` returning an existing thread is idempotency, not a creation, and a consumer that bound a domain object per idempotent retry would double-bind. Before this existed, nothing downstream could react to a new thread at all — a consumer learned a conversation existed only when its first message arrived on `chat.message` — which is why every binding of a thread to a domain object in this fleet was driven from the client that created it. `subject_type`/`subject_key` are the opaque pair the thread is ABOUT (empty on a thread about nothing in particular); `participant_ids` is every party at creation time.",
+  "type": "object",
+  "required": ["conversation_id", "kind", "participant_ids", "created_at"],
+  "properties": {
+    "conversation_id": { "type": "string", "format": "uuid" },
+    "kind":            { "type": "string", "enum": ["direct", "group", "support"] },
+    "scope_key":       { "type": "string" },
+    "subject_type":    { "type": "string", "description": "Registered subject type, or empty. Never parsed by this module." },
+    "subject_key":     { "type": "string", "description": "Opaque key within that type, or empty." },
+    "creator_id":      { "type": ["string", "null"], "description": "Who opened it. Null only where nobody did (a system-opened thread)." },
+    "participant_ids": { "type": "array", "items": { "type": "string" } },
+    "created_at":      { "type": "string" }
+  },
+  "additionalProperties": true
+}

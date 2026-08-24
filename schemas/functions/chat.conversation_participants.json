@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "chat.conversation_participants",
+  "description": "Who is a party to these conversations. Batch: {\"conversation_ids\": [...]} -> {\"conversations\": {id: {\"exists\", \"kind\", \"scope_key\", \"subject_type\", \"subject_key\", \"participants\": [{\"user_id\", \"role\"}]}}}. An id that names no conversation — or is not a well-formed id at all — comes back as {\"exists\": false} rather than being omitted: the caller is holding that id for a reason and must be told it is dead, not left to infer it from an absence. This is the read a consumer previously avoided by storing its own copy of the two party ids on its own row, where it could silently go stale. Deliberately NOT a permission check: it answers who is a party, and whether that means the caller may do a thing is the caller's policy to apply.",
+  "type": "object",
+  "required": ["conversation_ids"],
+  "properties": {
+    "conversation_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Conversation ids to answer for. Every id supplied appears in the answer."
+    }
+  },
+  "additionalProperties": false
+}

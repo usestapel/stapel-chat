@@ -17,6 +17,7 @@ from .dto import (
     MessageResponse,
     ParticipantResponse,
     SendMessageRequest,
+    SubjectResponse,
 )
 
 
@@ -68,6 +69,19 @@ class ParticipantResponseSerializer(StapelDataclassSerializer):
         dataclass = ParticipantResponse
 
 
+class SubjectResponseSerializer(StapelDataclassSerializer):
+    class Meta:
+        dataclass = SubjectResponse
+
+    def get_fields(self):
+        # The card belongs to whoever rendered it. A typed serializer here
+        # would be this module's second, staler answer to what a listing looks
+        # like — and it would drop every field the provider added since.
+        fields = super().get_fields()
+        fields["card"] = serializers.JSONField(required=False, allow_null=True)
+        return fields
+
+
 class AttachmentResponseSerializer(StapelDataclassSerializer):
     class Meta:
         dataclass = AttachmentResponse
@@ -86,6 +100,16 @@ class ConversationResponseSerializer(StapelDataclassSerializer):
 class CreateConversationRequestSerializer(StapelDataclassSerializer):
     class Meta:
         dataclass = CreateConversationRequest
+
+    def get_fields(self):
+        # Both subject fields are optional and may be blank: a thread about
+        # nothing in particular is the normal case, and "both or neither" is a
+        # domain rule the view answers with the localized error envelope.
+        fields = super().get_fields()
+        for name in ("subject_type", "subject_key"):
+            fields[name].required = False
+            fields[name].allow_blank = True
+        return fields
 
 
 class SendMessageRequestSerializer(StapelDataclassSerializer):

@@ -23,6 +23,13 @@ def main(argv=None):
     #   MAX_ATTACHMENTS / MAX_PREVIEW_B64_BYTES / EDIT_WINDOW_S (int limits)
     #   MODERATION_TARGET_TYPE (enum) — whether a message is reportable, and
     #                                 under which stapel-moderation target
+    #   SUBJECT_TYPES         (open registry) — what a conversation may be
+    #                                 ABOUT. Ships EMPTY; each policy names
+    #                                 the card_function that renders one.
+    #   SUBJECT_CARD_TIMEOUT_S (int) — how long a header card may take
+    #   BLOCK_ENFORCEMENT     (enum) — whether a blocked user may still send
+    #   BLOCK_FUNCTION        (str)  — who is asked, by name
+    #   BLOCK_TIMEOUT_S       (int)  — how long to wait for that answer
     #
     # There is deliberately NO realtime axis: the socket is the path, and a
     # deployment that cannot serve one fails manage.py check rather than
@@ -39,6 +46,11 @@ def main(argv=None):
         "MAX_PREVIEW_B64_BYTES",
         "EDIT_WINDOW_S",
         "MODERATION_TARGET_TYPE",
+        "SUBJECT_TYPES",
+        "SUBJECT_CARD_TIMEOUT_S",
+        "BLOCK_ENFORCEMENT",
+        "BLOCK_FUNCTION",
+        "BLOCK_TIMEOUT_S",
     }
     return run_capabilities_cli(
         argv,
@@ -59,6 +71,11 @@ def main(argv=None):
                 "MAX_PREVIEW_B64_BYTES": "chat.limits",
                 "EDIT_WINDOW_S": "chat.limits",
                 "MODERATION_TARGET_TYPE": "chat.moderation",
+                "SUBJECT_TYPES": "chat.subjects",
+                "SUBJECT_CARD_TIMEOUT_S": "chat.subjects",
+                "BLOCK_ENFORCEMENT": "chat.blocks",
+                "BLOCK_FUNCTION": "chat.blocks",
+                "BLOCK_TIMEOUT_S": "chat.blocks",
             }
         ),
         prog="stapel-chat-capabilities",

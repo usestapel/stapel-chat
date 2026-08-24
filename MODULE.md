@@ -310,6 +310,77 @@ notification and an appeal attached. A complaint about a *thread* is a
 complaint about the messages in it; each card carries its `conversation_id`
 so the context is one click away.
 
+### 8. Subject types — an OPEN registry (`subjects.py`)
+
+What a conversation is **about**: `(subject_type, subject_key)`, an opaque
+pair this module never parses. It is moderation's `(target_type, target_key)`
+idiom for the same reason — the pair is a NAME, and a messaging engine that
+learned what a listing is would be the wrong place for that knowledge.
+
+The registry **ships EMPTY**. A generic chat has no subject types, and the
+obvious one (`listing`) belongs to whoever owns listings. Merge over builtins:
+settings ← runtime, `None` removes.
+
+```python
+STAPEL_CHAT = {
+    "SUBJECT_TYPES": {
+        "listing": {"card_function": "classified.subject_cards"},
+    },
+}
+```
+
+`card_function` is required — a subject nothing can render is a string in a
+database, and a policy without one is refused at registration and
+`stapel_chat.E020` at boot. It names a **batched** comm Function:
+`{keys: [...]} -> {cards: {key: card}}`, one call per subject type for a whole
+page. The card is passed through untouched.
+
+Two rules a provider must honour, and chat holds it to both:
+
+- **Answer for every key you were asked about.** A subject that was deleted
+  comes back as a `gone` card, not as an omission. A key the provider drops is
+  reported as `meta_reason: "card_missing"` — rendering it as "no subject"
+  would hide a broken provider behind a plausible-looking header.
+- **Degradation is data.** Every subject carries `meta_status`/`meta_reason`
+  in the attachment vocabulary. A conversation never fails to open because a
+  catalogue blinked.
+
+**For a DIRECT thread the subject is part of the thread's identity.** See the
+0.6.0 CHANGELOG: the same two people asking about a different subject get a
+different thread, where before they were folded into the single thread they
+were allowed to have. A subject-less key is byte-identical to the pre-0.6.0
+one, which is what lets every existing conversation keep its identity.
+
+### 9. Block enforcement — a provider named, never imported (`blocks.py`)
+
+A block that only refuses NEW conversations is half a block; the send path is
+this module's. Enforced in the **service layer**, so it covers the socket —
+the canonical send path since 0.3.0 — and not only REST.
+
+`STAPEL_CHAT["BLOCK_FUNCTION"]` (default `profiles.relationships`) is asked by
+name: `{"pairs": [[a, b], ...]} -> {"blocked": [[a, b], ...]}`, either
+direction. No import edge is created between two modules that must stay
+independently deployable.
+
+| `BLOCK_ENFORCEMENT` | Provider reachable | Provider absent | Provider failing |
+|---|---|---|---|
+| `auto` (default) | enforced | delivered, `W003` at boot | **503** |
+| `required` | enforced | **503**, `E017` at boot | **503** |
+| `off` | not asked, `W004` | not asked, `W004` | not asked, `W004` |
+
+Three rules that do not bend:
+
+1. **A refusal discloses nothing.** 403 with a key that does not name a block,
+   from an exception carrying no reason and no direction — and it must never
+   grow either. Telling the blocked party turns a quiet boundary into a
+   notification.
+2. **A provider present and failing is a 503, never "allowed".**
+   `BlockCheckUnavailable` is deliberately not a `ChatError`, so a 503 cannot
+   be caught as a 403. An outage is not consent.
+3. **Direct threads only.** A group room is somebody else's convening;
+   a support thread is never checked, because an operator is not a peer and a
+   customer must not be able to mute the help desk. Both are asserted by tests.
+
 ### Events (comm surface)
 
 | Kind | Name | Payload | Schema |
@@ -318,8 +389,12 @@ so the context is one click away.
 | Emit | `chat.message.edited` | the same shape, `edited_at` non-null, fresh `rev_seq` | `schemas/emits/chat.message.edited.json` |
 | Emit | `chat.message.deleted` | `{message_id, conversation_id, seq, rev_seq, deleted_at, …}` | `schemas/emits/chat.message.deleted.json` |
 | Emit | `chat.support.assigned` | `{conversation_id, operator_id, scope_key}` | `schemas/emits/chat.support.assigned.json` |
+| Emit | `chat.conversation.created` | `{conversation_id, kind, scope_key, subject_type, subject_key, creator_id?, participant_ids[], created_at}` — **only on a real create**; an idempotent `create_direct` that returned an existing thread is not one | `schemas/emits/chat.conversation.created.json` |
 | Consume | `user.deleted` | `{user_id, ...}` | `schemas/consumes/user.deleted.json` |
 | Function | `chat.moderation_content` | in `{message_id}` → out `{text, title, language, media[], author_id, url, kind, conversation_id, conversation_kind, scope_key, seq, edited, created_at}` | `schemas/functions/chat.moderation_content.json` |
+| Function | `chat.conversation_participants` | in `{conversation_ids[]}` → out `{conversations: {id: {exists, kind, scope_key, subject_type, subject_key, participants[{user_id, role}]}}}` — every id asked about is answered, `exists: false` included | `schemas/functions/chat.conversation_participants.json` |
+| Call | `profiles.relationships` | out `{pairs: [[a, b], …]}` → in `{blocked: [[a, b], …]}` — consulted on every send into a direct thread, **by name, never imported** | owned by stapel-profiles |
+| Call | *(a subject type's `card_function`)* | out `{keys: [...]}` → in `{cards: {key: card}}` — batched, one call per subject type per page | owned by the provider, e.g. `classified.subject_cards` |
 | Signal | `chat.read` | `{conversation_id, user_id, last_read_seq}` | ephemeral — no schema, no outbox |
 | Signal | `chat.delivered` | `{conversation_id, user_id, last_delivered_seq}` | ephemeral |
 | Signal | `chat.activity` | `{conversation_id, user_id, state, ttl_s}` | ephemeral |

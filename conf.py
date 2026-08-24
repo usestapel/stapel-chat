@@ -42,6 +42,13 @@ CTO-facing config axes (capability-config.md §16):
 - ``MODERATION_TARGET_TYPE`` — the stapel-moderation target type registered
   for chat messages, when that module is installed and no host has declared
   the type itself. ``""`` registers nothing.
+- ``SUBJECT_TYPES`` — the OPEN subject-type registry (``subjects.py``), EMPTY
+  out of the box. Each policy names the ``card_function`` that renders that
+  subject. A marketplace declares ``listing`` here; a generic chat declares
+  nothing and every thread is about nothing in particular.
+- ``BLOCK_ENFORCEMENT`` / ``BLOCK_FUNCTION`` — whether a blocked party may
+  send into an existing direct thread, and who is asked. See ``blocks.py``:
+  a provider that is present and failing is a 503, never an admission.
 """
 from stapel_core.conf import AppSettings
 
@@ -94,6 +101,32 @@ DEFAULTS = {
     # that wants complaints about messages handled somewhere else, or not at
     # all, says so here rather than by uninstalling a dependency.
     "MODERATION_TARGET_TYPE": "chat_message",
+    # OPEN subject-type registry (subjects.py). EMPTY builtins: a messaging
+    # engine has no subject types of its own, and the one that would go here
+    # (`listing`) belongs to whoever owns listings. Merge over builtins, None
+    # removes. Each policy names a `card_function` — the batched comm Function
+    # ({keys} -> {cards}) that turns a subject key into a renderable card.
+    # A dict axis whose VALUES are policies, not a flag.
+    "SUBJECT_TYPES": {},
+    # Seconds to wait for a subject card before rendering the conversation
+    # without one. A header is never worth blocking a thread on.
+    "SUBJECT_CARD_TIMEOUT_S": 2.0,
+    # Whether a block stops a send into an EXISTING direct thread.
+    #   "auto"     — enforce when a block provider is reachable; when there is
+    #                none, this deployment has no blocks and W003 says so at
+    #                every boot.
+    #   "required" — a deployment that HAS blocks and refuses to run without
+    #                them: an unreachable provider is E017 at check time and a
+    #                503 at send time, never an allowed message.
+    #   "off"      — deliberately not enforced (W004). A choice on the record.
+    "BLOCK_ENFORCEMENT": "auto",
+    # The comm Function asked, BY NAME — never an import. stapel-profiles owns
+    # blocks; `profiles.relationships` takes {"pairs": [[a, b], ...]} and
+    # answers {"blocked": [[a, b], ...]}, blocked in either direction.
+    "BLOCK_FUNCTION": "profiles.relationships",
+    # Seconds to wait for the block answer. Timing out is an outage, and an
+    # outage is a 503 — never a delivered message.
+    "BLOCK_TIMEOUT_S": 2.0,
     # Dotted path to a ScopeProvider — resolves the opaque scope_key from a
     # request and filters querysets by it. The default is a no-op (single
     # global scope); a host may return e.g. the active workspace_id.

@@ -82,6 +82,14 @@ ERROR_NOT_AUTHOR = "not_author"
 ERROR_NOT_EDITABLE = "not_editable"
 ERROR_DELETED = "deleted"
 ERROR_UNKNOWN_ACTIVITY = "unknown_activity"
+# A send refused because a block stands between the two parties. The frame
+# carries no reason and no direction — the socket is the path a blocked sender
+# actually uses, and a wire code that named the block would announce it.
+ERROR_SEND_REFUSED = "send_refused"
+# The block store is configured and could not be asked. Distinct from
+# `send_refused` on purpose: a client may retry this one, and must not show
+# the sender anything that reads as a rejection by the other party.
+ERROR_UNAVAILABLE = "unavailable"
 
 
 # ── sync helpers (each runs in a thread) ────────────────────────────────
@@ -174,6 +182,10 @@ def _do_send(conversation_id, user_id, payload: dict) -> dict | None:
             kind=MessageKind.TEXT,
             client_msg_id=str(payload.get("client_msg_id") or ""),
         )
+    except services.SendRefused:
+        return {"code": ERROR_SEND_REFUSED, "message": "message not sent"}
+    except services.BlockCheckUnavailable:
+        return {"code": ERROR_UNAVAILABLE, "message": "try again shortly"}
     except UnknownAttachmentType as exc:
         return {
             "code": ERROR_UNKNOWN_ATTACHMENT_TYPE,

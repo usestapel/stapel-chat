@@ -414,3 +414,152 @@ def check_activity_registry(app_configs, **kwargs):
                 )
             )
     return issues
+
+
+# ── Subjects and blocks (0.6.0) ──────────────────────────────────────────
+
+
+@checks.register(checks.Tags.compatibility)
+def check_subject_types(app_configs, **kwargs):
+    """A subject type nobody can render is a string in a database.
+
+    The registry ships empty, so silence here is the normal state of a generic
+    chat. What is refused is a declared type whose ``card_function`` is
+    missing or names something that will never answer: without this the defect
+    surfaces as a blank header the first time a real user opens a real thread.
+    """
+    from stapel_core.comm import function_unreachable_reason
+
+    from .subjects import get_subject_types
+
+    try:
+        types = get_subject_types()
+    except Exception as exc:
+        return [
+            checks.Error(
+                f"STAPEL_CHAT['SUBJECT_TYPES'] could not be merged: {exc}",
+                id="stapel_chat.E020",
+            )
+        ]
+
+    issues = []
+    for name, policy in types.items():
+        if not isinstance(policy, dict):
+            issues.append(
+                checks.Error(
+                    f"Subject type {name!r} must map to a dict "
+                    f"(got {type(policy).__name__}); use None to remove one.",
+                    id="stapel_chat.E020",
+                )
+            )
+            continue
+        card_function = (policy.get("card_function") or "").strip()
+        if not card_function:
+            issues.append(
+                checks.Error(
+                    f"Subject type {name!r} declares no 'card_function'. A "
+                    "conversation about it would render a header nothing can "
+                    "fill — the exact 'unclear about what' this surface "
+                    "exists to close.",
+                    hint="Name the batched comm Function that turns keys into "
+                         "cards, e.g. {'card_function': "
+                         "'classified.subject_cards'}.",
+                    id="stapel_chat.E020",
+                )
+            )
+            continue
+        reason = function_unreachable_reason(card_function)
+        if reason:
+            # A Warning, not an Error: over a bus transport nothing here can
+            # prove a remote provider is up, and refusing to boot on that
+            # would make chat undeployable ahead of its provider.
+            issues.append(
+                checks.Warning(
+                    f"Subject type {name!r} names card_function "
+                    f"{card_function!r}, which is not reachable from this "
+                    f"process: {reason}. Conversations about this subject "
+                    "will render with meta_status='partial' and "
+                    "meta_reason='card_function_unreachable' until it is.",
+                    hint="Expected if the provider is a separate service "
+                         "reached over the bus. If it is meant to be "
+                         "in-process, its module is not imported here.",
+                    id="stapel_chat.W005",
+                )
+            )
+    return issues
+
+
+@checks.register(checks.Tags.security)
+def check_block_enforcement(app_configs, **kwargs):
+    """Say out loud, at every boot, whether blocks are enforced here.
+
+    A block that stops nothing is the kind of thing a deployment discovers
+    from a user complaint. All three states are announced — including the
+    deliberate 'off', because a decision on the record is not a defect but an
+    undeclared one is.
+    """
+    from .blocks import (
+        ENFORCEMENT_MODES,
+        ENFORCEMENT_OFF,
+        ENFORCEMENT_REQUIRED,
+        enforcement_mode,
+        provider_unreachable_reason,
+    )
+    from .conf import chat_settings
+
+    raw = str(chat_settings.BLOCK_ENFORCEMENT or "").strip().lower()
+    if raw and raw not in ENFORCEMENT_MODES:
+        return [
+            checks.Error(
+                f"STAPEL_CHAT['BLOCK_ENFORCEMENT'] is {raw!r}; it must be one "
+                f"of {list(ENFORCEMENT_MODES)}. An unrecognized value is read "
+                "as 'auto' at runtime, which is not a thing to leave implicit "
+                "for a security control.",
+                id="stapel_chat.E018",
+            )
+        ]
+
+    mode = enforcement_mode()
+    if mode == ENFORCEMENT_OFF:
+        return [
+            checks.Warning(
+                "STAPEL_CHAT['BLOCK_ENFORCEMENT'] is 'off': a blocked user "
+                "may send into an existing direct thread in this deployment. "
+                "New-conversation refusals elsewhere in the fleet still "
+                "apply, but a block that only stops NEW conversations is half "
+                "a block.",
+                hint="Set it to 'auto' (enforce when a provider is reachable) "
+                     "or 'required' (refuse to run without one).",
+                id="stapel_chat.W004",
+            )
+        ]
+
+    reason = provider_unreachable_reason()
+    if not reason:
+        return []
+    name = (chat_settings.BLOCK_FUNCTION or "").strip()
+    if mode == ENFORCEMENT_REQUIRED:
+        return [
+            checks.Error(
+                f"STAPEL_CHAT['BLOCK_ENFORCEMENT'] is 'required' and the "
+                f"block provider {name!r} is not reachable: {reason}. Sends "
+                "into direct threads will answer 503 until it is — which is "
+                "the correct behaviour for 'required' and a broken "
+                "deployment either way.",
+                hint="Install/mount the provider (stapel-profiles serves "
+                     "'profiles.relationships'), repoint "
+                     "STAPEL_CHAT['BLOCK_FUNCTION'], or drop to 'auto'.",
+                id="stapel_chat.E017",
+            )
+        ]
+    return [
+        checks.Warning(
+            f"Block enforcement is 'auto' and the block provider {name!r} is "
+            f"not reachable from this process: {reason}. Blocks are NOT "
+            "enforced on the send path in this deployment.",
+            hint="Expected while the provider is a separate service reached "
+                 "over the bus, or before it ships. Set 'required' to make "
+                 "its absence a boot failure instead of an advisory.",
+            id="stapel_chat.W003",
+        )
+    ]

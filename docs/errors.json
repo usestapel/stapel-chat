@@ -48,6 +48,14 @@
     "owner": "stapel_chat"
   },
   {
+    "code": "error.400.chat_incomplete_subject",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "A subject needs both a type and a key",
+    "owner": "stapel_chat"
+  },
+  {
     "code": "error.400.chat_invalid_attachment",
     "status": 400,
     "params": [],
@@ -125,6 +133,14 @@
     "params": [],
     "remediation": "fix_input",
     "en": "This attachment type is not registered in this deployment",
+    "owner": "stapel_chat"
+  },
+  {
+    "code": "error.400.chat_unknown_subject_type",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "This subject type is not registered in this deployment",
     "owner": "stapel_chat"
   },
   {
@@ -322,6 +338,14 @@
     "owner": "stapel_chat"
   },
   {
+    "code": "error.403.chat_send_refused",
+    "status": 403,
+    "params": [],
+    "remediation": "retry",
+    "en": "This message could not be sent",
+    "owner": "stapel_chat"
+  },
+  {
     "code": "error.403.forbidden",
     "status": 403,
     "params": [],
@@ -506,6 +530,14 @@
     "remediation": "contact_support",
     "en": "Something went wrong",
     "owner": "stapel_core"
+  },
+  {
+    "code": "error.503.chat_blocks_unavailable",
+    "status": 503,
+    "params": [],
+    "remediation": "retry",
+    "en": "Messaging is temporarily unavailable, please try again",
+    "owner": "stapel_chat"
   },
   {
     "code": "error.503.mandate_unavailable",

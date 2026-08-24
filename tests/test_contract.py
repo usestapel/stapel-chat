@@ -167,6 +167,13 @@ def test_capabilities_axes():
         "ACTIVITY_STATES",
         "EDIT_WINDOW_S",
         "MODERATION_TARGET_TYPE",
+        # 0.6.0 — what a conversation may be about, and whether a block
+        # reaches the send path.
+        "SUBJECT_TYPES",
+        "SUBJECT_CARD_TIMEOUT_S",
+        "BLOCK_ENFORCEMENT",
+        "BLOCK_FUNCTION",
+        "BLOCK_TIMEOUT_S",
     }
     assert axes["CHAT_KINDS"]["kind"] == "list"
     assert axes["ATTACHMENTS"]["kind"] == "bool"

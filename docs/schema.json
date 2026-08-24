@@ -819,6 +819,15 @@
             "nullable": true,
             "description": "Assigned support operator, if any"
           },
+          "subject": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SubjectResponse"
+              }
+            ],
+            "nullable": true,
+            "description": "What the thread is about, with its rendered card inlined —"
+          },
           "participants": {
             "type": "array",
             "items": {
@@ -852,6 +861,14 @@
               "type": "string"
             },
             "description": "Other participants to add (the requesting user is"
+          },
+          "subject_type": {
+            "type": "string",
+            "description": "What this thread is about, by registered type. Supply"
+          },
+          "subject_key": {
+            "type": "string",
+            "description": "The opaque key within that type. Never parsed here"
           },
           "scope_key": {
             "type": "string",
@@ -1123,6 +1140,39 @@
             "description": "Sender-generated idempotency key. Retrying the same"
           }
         }
+      },
+      "SubjectResponse": {
+        "type": "object",
+        "description": "What a conversation is about, and the card somebody else rendered.\n\nThe ``(type, key)`` pair is this module's; the ``card`` is not — it is\nwhatever the subject type's ``card_function`` answered, passed through\nuntouched. Chat does not know what a listing is and never will, so it\nstores a name and asks the owner.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Registered subject type (``listing``, …)"
+          },
+          "key": {
+            "type": "string",
+            "description": "Opaque key within that type"
+          },
+          "card": {
+            "type": "object",
+            "additionalProperties": {},
+            "nullable": true,
+            "description": "The provider's card, or ``null`` when there is none to show"
+          },
+          "meta_status": {
+            "type": "string",
+            "description": "``ok`` / ``partial`` / ``missing`` — the attachment"
+          },
+          "meta_reason": {
+            "type": "string",
+            "nullable": true,
+            "description": "``subject_type_unregistered`` /"
+          }
+        },
+        "required": [
+          "key",
+          "type"
+        ]
       }
     },
     "securitySchemes": {

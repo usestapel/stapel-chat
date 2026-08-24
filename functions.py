@@ -13,12 +13,18 @@ Emits (see schemas/emits/):
   downstream (search indexer, notifier) subscribe.
 - ``chat.support.assigned`` — a support conversation was assigned to an
   operator. Routing/notification layers subscribe.
+- ``chat.conversation.created`` — a thread was opened. Emitted only on a real
+  create (an idempotent ``create_direct`` that returned an existing thread is
+  not one), so a consumer may bind a domain object to it exactly once.
 
 Functions (see schemas/functions/):
 - ``chat.moderation_content`` — a message's content for an external moderation
   module's screening and moderator card. Identifiers travel on the bus;
   content is fetched at the moment it is looked at. Named as the
   ``content_function`` of the ``chat_message`` target type (moderation.py).
+- ``chat.conversation_participants`` — who is a party to these conversations,
+  batched, answering for every id asked. The read a consumer had to avoid by
+  keeping its own copy of the parties on its own row.
 
 Consumes (see schemas/consumes/):
 - ``user.deleted`` — erase the deleted user's messages and participations
@@ -52,3 +58,27 @@ def moderation_content(payload):
     from . import services
 
     return services.moderation_content(payload["message_id"])
+
+
+@function(
+    "chat.conversation_participants",
+    schema=_schema("chat.conversation_participants"),
+)
+def conversation_participants(payload):
+    """Return the parties to each conversation asked about.
+
+    Input: ``{"conversation_ids": [str, …]}``.
+    Output: ``{"conversations": {id: {"exists", "kind", "scope_key",
+    "subject_type", "subject_key", "participants": [{"user_id", "role"}]}}}``.
+
+    Every id supplied comes back, including one that names nothing
+    (``exists: false``). Unguarded, like the rest of this family: the bus is
+    a trusted boundary, and *who may ask* is the caller's deployment policy.
+    """
+    from . import services
+
+    return {
+        "conversations": services.conversation_participants(
+            payload.get("conversation_ids") or []
+        )
+    }

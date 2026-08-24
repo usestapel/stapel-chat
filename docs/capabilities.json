@@ -1,6 +1,6 @@
 {
   "module": "stapel-chat",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "provides": "Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).",
   "axes": [
     {
@@ -156,6 +156,81 @@
         "summary": "The stapel-moderation target type registered for chat messages. \"chat_message\" (the default) makes a message reportable: a complaint opens a case on the real message, read through chat.moderation_content, instead of on the reporter's screenshot. \"\" registers nothing.",
         "business_label": "Whether members can report chat messages"
       }
+    },
+    {
+      "key": "SUBJECT_TYPES",
+      "kind": "enum",
+      "default": {},
+      "group": "chat.subjects",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "A conversation may only be created with a subject type that is registered (400 otherwise). For a DIRECT thread the subject is part of the thread's identity — the same two people asking about a different subject get a different thread. A declared type whose card_function is missing is a boot error (E020); one that is merely unreachable from this process is a warning (W005) and its conversations render with meta_status=partial."
+      },
+      "curated": {
+        "summary": "The subject types this deployment offers, each naming the batched comm Function that renders one into a card. Ships EMPTY: a generic chat has no subject types, and the obvious one (\"listing\") belongs to whoever owns listings, not to messaging. A marketplace declares {\"listing\": {\"card_function\": \"classified.subject_cards\"}}. Merge over builtins; None removes.",
+        "business_label": "What conversations can be about"
+      }
+    },
+    {
+      "key": "SUBJECT_CARD_TIMEOUT_S",
+      "kind": "enum",
+      "default": 2.0,
+      "group": "chat.subjects",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "On timeout the conversation is returned with subject.meta_status=\"partial\" and meta_reason=\"card_function_failed\"; the thread and its messages are unaffected."
+      },
+      "curated": {
+        "summary": "Seconds to wait for a subject type's card_function before rendering the conversation without its card. A header is never worth blocking a thread on.",
+        "business_label": "How long to wait for a conversation's header card"
+      }
+    },
+    {
+      "key": "BLOCK_ENFORCEMENT",
+      "kind": "enum",
+      "default": "auto",
+      "group": "chat.blocks",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "Direct threads only. A blocked send answers 403 with an error key that names no block and discloses no direction; a provider that is present and FAILING answers 503, never a delivered message, because an outage is not consent. Group threads are not checked (a room is somebody else's convening) and support threads never are (an operator is not a peer, and a customer must not be able to mute the help desk)."
+      },
+      "curated": {
+        "summary": "Whether a block stops a send into an EXISTING direct thread. \"auto\" enforces when a block provider is reachable and does not when there is none (announced at every boot by W003). \"required\" is for a deployment that has blocks and refuses to run without them: an unreachable provider is a boot error and a 503 at send. \"off\" is a deliberate decision on the record (W004). Blocking elsewhere in the fleet only stops NEW conversations — a block that does not reach the send path is half a block.",
+        "business_label": "Whether a blocked user can still send"
+      }
+    },
+    {
+      "key": "BLOCK_FUNCTION",
+      "kind": "enum",
+      "default": "profiles.relationships",
+      "group": "chat.blocks",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "Consulted once per send into a direct thread, batched over every other party. If the name is not registered anywhere, behaviour follows BLOCK_ENFORCEMENT."
+      },
+      "curated": {
+        "summary": "The comm Function consulted for blocks, by name — never an import, so chat and the block owner stay independently deployable. Default \"profiles.relationships\" (stapel-profiles): {\"pairs\": [[a, b], ...]} in, {\"blocked\": [[a, b], ...]} out, blocked in either direction. Repoint it at a different provider without forking.",
+        "business_label": "Who is asked whether two users are blocked"
+      }
+    },
+    {
+      "key": "BLOCK_TIMEOUT_S",
+      "kind": "enum",
+      "default": 2.0,
+      "group": "chat.blocks",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "A timeout is an outage: the send answers 503 and the message is not delivered. Failing open would deliver a message to somebody who blocked the sender, and they would never know why."
+      },
+      "curated": {
+        "summary": "Seconds to wait for the block provider before treating the call as failed. Unlike a subject card, a timeout here is never shrugged off.",
+        "business_label": "How long to wait for the block answer"
+      }
     }
   ],
   "extension_points": [
@@ -217,6 +292,15 @@
       "kind": "gate_function",
       "path": "stapel_chat.services.assign_operator",
       "intent": "First-come claim of a support thread under a row lock: refuses a second operator, stays idempotent for the same one, adds the participant, emits the event and posts the system line. Two operators pressing \"take\" in the same second is the race this exists for."
+    },
+    {
+      "name": "conversation_participants",
+      "kind": "predicate",
+      "path": "stapel_chat.services.conversation_participants",
+      "intent": "Answer, in one batched call, who is a party to each of these conversations — with the thread's kind and subject. Reach for it instead of storing your own copy of the two party ids on your own row: a copy nothing can refresh is a copy that goes stale the moment a participant changes here. Every id asked about is answered, including one that names nothing (exists: false), because a caller holding a dead id must be told rather than left to infer it from an absence.",
+      "instead_of": [
+        "stapel_chat.models.ConversationParticipant.objects.filter"
+      ]
     },
     {
       "name": "create_direct",
@@ -331,6 +415,15 @@
       "kind": "gate_function",
       "path": "stapel_chat.services.set_support_status",
       "intent": "Move a support thread between open/pending/resolved and optionally post the system line marking the transition. The one to call for pending, which has no dedicated wrapper."
+    },
+    {
+      "name": "subject_cards_for",
+      "kind": "factory",
+      "path": "stapel_chat.services.subject_cards_for",
+      "intent": "Resolve the subject cards for a whole list of conversations in ONE call per subject type, by asking each type's registered card_function. Reach for it whenever you render more than one conversation: resolving per conversation turns a fifty-row inbox into fifty round trips, which is the entire reason the provider contract is a batch.",
+      "instead_of": [
+        "stapel_core.comm.call"
+      ]
     },
     {
       "name": "support_queue",

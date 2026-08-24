@@ -22,7 +22,7 @@ from stapel_core.django.api.pagination import (
 # a host that subclassed `stapel_chat.views.SerializerSeamMixin` keeps working.
 from stapel_core.django.api.views import SerializerSeamMixin
 
-from . import services
+from . import services, subjects
 from .activity import UnknownActivityState
 from .attachments import InvalidAttachment, UnknownAttachmentType
 from .conf import chat_settings
@@ -31,6 +31,7 @@ from .dto import (
     ConversationResponse,
     MessageResponse,
     ParticipantResponse,
+    SubjectResponse,
 )
 from .errors import (
     ERR_400_ATTACHMENTS_DISABLED,
@@ -38,6 +39,7 @@ from .errors import (
     ERR_400_EMPTY_MESSAGE,
     ERR_400_INVALID_ATTACHMENT,
     ERR_400_INVALID_DIRECT,
+    ERR_400_INCOMPLETE_SUBJECT,
     ERR_400_INVALID_KIND,
     ERR_400_INVALID_REPLY,
     ERR_400_KIND_DISABLED,
@@ -45,12 +47,15 @@ from .errors import (
     ERR_400_NOT_EDITABLE,
     ERR_400_UNKNOWN_ACTIVITY_STATE,
     ERR_400_UNKNOWN_ATTACHMENT_TYPE,
+    ERR_400_UNKNOWN_SUBJECT_TYPE,
     ERR_403_NOT_AUTHOR,
     ERR_403_NOT_OPERATOR,
     ERR_403_NOT_PARTICIPANT,
     ERR_404_CONVERSATION_NOT_FOUND,
     ERR_404_MESSAGE_NOT_FOUND,
+    ERR_403_SEND_REFUSED,
     ERR_409_ALREADY_ASSIGNED,
+    ERR_503_BLOCKS_UNAVAILABLE,
 )
 from .models import (
     Conversation,
@@ -179,7 +184,34 @@ def message_to_dto(msg: Message) -> MessageResponse:
     )
 
 
-def conversation_to_dto(conv: Conversation, viewer_participant=None) -> ConversationResponse:
+def subject_to_dto(conv: Conversation, resolution=None) -> SubjectResponse | None:
+    """The conversation's subject, with whatever card was resolved for it.
+
+    ``resolution`` comes from the batched lookup; ``None`` means nobody asked
+    for a card (a single-conversation read that chose not to), which is
+    reported as a degraded card rather than as "no subject" — the thread does
+    have one, and a header that silently vanishes is how the wrong card gets
+    rendered instead of no card.
+    """
+    if not conv.subject_type or not conv.subject_key:
+        return None
+    resolution = resolution or {
+        "card": None,
+        "meta_status": subjects.META_PARTIAL,
+        "meta_reason": subjects.REASON_UNREACHABLE,
+    }
+    return SubjectResponse(
+        type=conv.subject_type,
+        key=conv.subject_key,
+        card=resolution.get("card"),
+        meta_status=resolution.get("meta_status") or subjects.META_PARTIAL,
+        meta_reason=resolution.get("meta_reason"),
+    )
+
+
+def conversation_to_dto(
+    conv: Conversation, viewer_participant=None, subject_resolution=None
+) -> ConversationResponse:
     unread = (
         services.unread_count(conversation=conv, participant=viewer_participant)
         if viewer_participant is not None
@@ -202,6 +234,7 @@ def conversation_to_dto(conv: Conversation, viewer_participant=None) -> Conversa
         assigned_operator_id=(
             str(conv.assigned_operator_id) if conv.assigned_operator_id else None
         ),
+        subject=subject_to_dto(conv, subject_resolution),
         participants=[
             ParticipantResponse(
                 user_id=str(p.user_id),
@@ -275,10 +308,16 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
         )
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request)
+        # ONE card call per subject type for the whole page. Resolving per
+        # conversation would make a fifty-row inbox fifty round trips, which
+        # is why the provider contract is a batch in the first place.
+        cards = services.subject_cards_for(page)
         response_cls = self.get_response_serializer_class()
         items = [
             response_cls(
-                conversation_to_dto(c, _my_participant(c, request.user))
+                conversation_to_dto(
+                    c, _my_participant(c, request.user), cards.get(str(c.id))
+                )
             ).data
             for c in page
         ]
@@ -300,30 +339,57 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
         scope_key = get_scope_provider().resolve(request)
         participant_ids = data.participant_ids or []
 
-        if kind == ConversationKind.DIRECT:
-            others = [pid for pid in participant_ids if str(pid) != str(request.user.id)]
-            if len(others) != 1:
-                return StapelErrorResponse(400, ERR_400_INVALID_DIRECT)
-            conv = services.create_direct(
-                owner=request.user, other_user_id=others[0], scope_key=scope_key
-            )
-        elif kind == ConversationKind.GROUP:
-            conv = services.create_group(
-                owner=request.user, participant_ids=participant_ids, scope_key=scope_key
-            )
-        else:  # support
-            conv = services.create_support(
-                customer=request.user, scope_key=scope_key
-            )
+        subject_type = (data.subject_type or "").strip()
+        subject_key = (data.subject_key or "").strip()
+
+        try:
+            if kind == ConversationKind.DIRECT:
+                others = [
+                    pid for pid in participant_ids if str(pid) != str(request.user.id)
+                ]
+                if len(others) != 1:
+                    return StapelErrorResponse(400, ERR_400_INVALID_DIRECT)
+                conv = services.create_direct(
+                    owner=request.user,
+                    other_user_id=others[0],
+                    scope_key=scope_key,
+                    subject_type=subject_type,
+                    subject_key=subject_key,
+                )
+            elif kind == ConversationKind.GROUP:
+                conv = services.create_group(
+                    owner=request.user,
+                    participant_ids=participant_ids,
+                    scope_key=scope_key,
+                    subject_type=subject_type,
+                    subject_key=subject_key,
+                )
+            else:  # support
+                # A support thread is about the deployment, not about an
+                # object in it; a subject here would be a field nobody reads.
+                conv = services.create_support(
+                    customer=request.user, scope_key=scope_key
+                )
+        except services.UnknownSubjectType:
+            return StapelErrorResponse(400, ERR_400_UNKNOWN_SUBJECT_TYPE)
+        except services.IncompleteSubject:
+            return StapelErrorResponse(400, ERR_400_INCOMPLETE_SUBJECT)
 
         conv = (
             Conversation.objects.prefetch_related("participants")
             .filter(id=conv.id)
             .first()
         )
+        cards = services.subject_cards_for([conv])
         response_cls = self.get_response_serializer_class()
         return StapelResponse(
-            response_cls(conversation_to_dto(conv, _my_participant(conv, request.user))),
+            response_cls(
+                conversation_to_dto(
+                    conv,
+                    _my_participant(conv, request.user),
+                    cards.get(str(conv.id)),
+                )
+            ),
             status=status.HTTP_201_CREATED,
         )
 
@@ -343,8 +409,13 @@ class ConversationDetailView(SerializerSeamMixin, APIView):
         participant = _my_participant(conv, request.user)
         if participant is None:
             return StapelErrorResponse(403, ERR_403_NOT_PARTICIPANT)
+        cards = services.subject_cards_for([conv])
         response_cls = self.get_response_serializer_class()
-        return StapelResponse(response_cls(conversation_to_dto(conv, participant)))
+        return StapelResponse(
+            response_cls(
+                conversation_to_dto(conv, participant, cards.get(str(conv.id)))
+            )
+        )
 
 
 @extend_schema(tags=["Chat"])
@@ -409,6 +480,17 @@ class MessageListCreateView(SerializerSeamMixin, APIView):
             )
         except services.InvalidReply:
             return StapelErrorResponse(400, ERR_400_INVALID_REPLY)
+        except services.SendRefused:
+            # 403 with a key that names no block. The blocked party is told
+            # the message did not send, and nothing else — not who blocked
+            # whom, not that a block exists. Anything more turns a quiet
+            # boundary into a notification.
+            return StapelErrorResponse(403, ERR_403_SEND_REFUSED)
+        except services.BlockCheckUnavailable:
+            # 503, never 403 and never a delivered message. An outage is not
+            # consent, and a 403 here would tell a sender they are blocked
+            # when in fact the block store is down.
+            return StapelErrorResponse(503, ERR_503_BLOCKS_UNAVAILABLE)
         except UnknownAttachmentType:
             return StapelErrorResponse(400, ERR_400_UNKNOWN_ATTACHMENT_TYPE)
         except InvalidAttachment:
@@ -582,10 +664,16 @@ class SupportQueueView(SerializerSeamMixin, APIView):
         )
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request)
+        # ONE card call per subject type for the whole page. Resolving per
+        # conversation would make a fifty-row inbox fifty round trips, which
+        # is why the provider contract is a batch in the first place.
+        cards = services.subject_cards_for(page)
         response_cls = self.get_response_serializer_class()
         items = [
             response_cls(
-                conversation_to_dto(c, _my_participant(c, request.user))
+                conversation_to_dto(
+                    c, _my_participant(c, request.user), cards.get(str(c.id))
+                )
             ).data
             for c in page
         ]

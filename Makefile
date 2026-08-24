@@ -24,7 +24,16 @@ PYTHON ?= python3
 # body, and that the type is registered only into a gap so a composite's own
 # policy is never overwritten. An agent that reads neither writes the bug.
 # Trim before raising it again.
-LLMS_BUDGET ?= 4800
+# Raised again in 0.6.0, from 4800, by 800: this release adds the largest
+# fleet-visible surface since 0.3.0 — a conversation's SUBJECT and the open
+# registry behind it, a new emit, a new comm read, and block enforcement with
+# five config axes. The lines that would have to go to fit 4800 are the three
+# an agent cannot write correct code without: that a DIRECT thread's identity
+# now includes its subject, that a block refusal must disclose nothing, and
+# that a block provider which is present and failing answers 503 rather than
+# delivering the message. An agent that reads none of them writes the bug.
+# Trim before raising it again.
+LLMS_BUDGET ?= 5600
 
 .PHONY: contract contract-check
 

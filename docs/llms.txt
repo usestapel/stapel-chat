@@ -1,8 +1,8 @@
-# stapel-chat 0.5.1
+# stapel-chat 0.6.0
 
 Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).
 
-Contract: axes 10 · surface 18 · extension points 9 · operations 13 · error codes 61.
+Contract: axes 15 · surface 20 · extension points 9 · operations 13 · error codes 65.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -15,6 +15,12 @@ Settings keys; `default` is what you get by saying nothing. Turning an axis off 
   "cdn" (the default) asks the CDN to describe a message's attachments in one call as it is sent, so thumbnails, aspect ratios, durations and waveforms are computed once by the service that owns the file. "client" trusts what the sender's app supplied and makes no call — faster, and only sound where the sender is trusted.
 - ATTACHMENT_TYPES [enum, default {}] — Which kinds of attachment exist
   The catalogue of attachment kinds this deployment accepts. Out of the box: photos, animated GIFs, video, voice/audio and documents — named exactly as stapel-cdn names them, so the two never drift into two vocabularies for one thing. It is an open list: a product that wants stickers, locations or contact cards adds them in configuration and the API accepts them the same day.
+- BLOCK_ENFORCEMENT [enum, default "auto"] — Whether a blocked user can still send
+  Whether a block stops a send into an EXISTING direct thread. "auto" enforces when a block provider is reachable and does not when there is none (announced at every boot by W003). "required" is for a deployment that has blocks and refuses to run without them: an unreachable provider is a boot error and a 503 at send. "off" is a deliberate decision on the record (W004). Blocking elsewhere in the fleet only stops NEW conversations — a block that does not reach the send path is half a block.
+- BLOCK_FUNCTION [enum, default "profiles.relationships"] — Who is asked whether two users are blocked
+  The comm Function consulted for blocks, by name — never an import, so chat and the block owner stay independently deployable. Default "profiles.relationships" (stapel-profiles): {"pairs": [[a, b], ...]} in, {"blocked": [[a, b], ...]} out, blocked in either direction. Repoint it at a different provider without forking.
+- BLOCK_TIMEOUT_S [enum, default 2.0] — How long to wait for the block answer
+  Seconds to wait for the block provider before treating the call as failed. Unlike a subject card, a timeout here is never shrugged off.
 - CHAT_KINDS [list, default ["direct", "group", "support"]] — Which conversation types are offered
   The enabled subset of direct (1:1), group and support threads. Drop "support" to run a pure peer-to-peer chat with no operator queue or assignment; drop "group" to allow only 1:1 direct threads. Creating (or, for support, operating on) a kind that is not enabled is refused. Values: any non-empty subset of direct, group, support.
 - EDIT_WINDOW_S [enum, default 0] — How long a message stays editable
@@ -27,6 +33,10 @@ Settings keys; `default` is what you get by saying nothing. Turning an axis off 
   Ceiling on the tiny preview image that travels inside the message itself (the blur-up thumbnail, the video poster, the voice waveform). Matches the CDN's own budget deliberately — a larger number here would accept what the authority already refused. The cap exists because these are bytes from one user rendered on another user's screen, and they multiply by the number of attachments on the page.
 - MODERATION_TARGET_TYPE [enum, default "chat_message"] — Whether members can report chat messages
   The stapel-moderation target type registered for chat messages. "chat_message" (the default) makes a message reportable: a complaint opens a case on the real message, read through chat.moderation_content, instead of on the reporter's screenshot. "" registers nothing.
+- SUBJECT_CARD_TIMEOUT_S [enum, default 2.0] — How long to wait for a conversation's header card
+  Seconds to wait for a subject type's card_function before rendering the conversation without its card. A header is never worth blocking a thread on.
+- SUBJECT_TYPES [enum, default {}] — What conversations can be about
+  The subject types this deployment offers, each naming the batched comm Function that renders one into a card. Ships EMPTY: a generic chat has no subject types, and the obvious one ("listing") belongs to whoever owns listings, not to messaging. A marketplace declares {"listing": {"card_function": "classified.subject_cards"}}. Merge over builtins; None removes.
 
 ## Usage surface — call these before writing your own
 This is the answer to "does Stapel already have something for X?". `instead of` names the outside symbol this one displaces.
@@ -59,6 +69,10 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
   Close a support thread — status resolved plus its system line — so "resolved" reads the same way in every deployment's transcript and no thread closes without a marker in its history.
 - set_support_status — stapel_chat.services.set_support_status
   Move a support thread between open/pending/resolved and optionally post the system line marking the transition. The one to call for pending, which has no dedicated wrapper.
+### predicate
+- conversation_participants — stapel_chat.services.conversation_participants
+  instead of: stapel_chat.models.ConversationParticipant.objects.filter
+  Answer, in one batched call, who is a party to each of these conversations — with the thread's kind and subject. Reach for it instead of storing your own copy of the two party ids on your own row: a copy nothing can refresh is a copy that goes stale the moment a participant changes here. Every id asked about is answered, including one that names nothing (exists: false), because a caller holding a dead id must be told rather than left to infer it from an absence.
 ### factory
 - create_direct — stapel_chat.services.create_direct
   instead of: stapel_chat.models.Conversation.objects.get_or_create
@@ -74,6 +88,9 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
 - post_message — stapel_chat.services.post_message
   instead of: stapel_chat.models.Message.objects.create
   THE send path, and the only sanctioned way a message comes into being: allocates the next seq under a row lock, persists the row and the chat.message outbox event in ONE transaction, normalizes and CDN-enriches the attachments once, fans out to the sockets on commit, and returns the existing row when a client_msg_id is retried. Inserting a Message with your own seq bypasses the counter, breaks the order history paging and realtime resume both anchor on, emits nothing, and reaches no open socket.
+- subject_cards_for — stapel_chat.services.subject_cards_for
+  instead of: stapel_core.comm.call
+  Resolve the subject cards for a whole list of conversations in ONE call per subject type, by asking each type's registered card_function. Reach for it whenever you render more than one conversation: resolving per conversation turns a fifty-row inbox into fifty round trips, which is the entire reason the provider contract is a batch.
 - support_queue — stapel_chat.services.support_queue
   The operator queue as a queryset: unassigned support threads still open or pending, oldest first. Pass qs= to pre-scope it rather than re-deriving the filter — a second copy of "what is still waiting" drifts from the one assign_operator enforces.
 - unread_count — stapel_chat.services.unread_count
@@ -124,7 +141,7 @@ Paths are relative to `/chat/api/v1/`.
 - POST /support/conversations/{conversation_id}/resolve — chat_api_v1_support_conversations_resolve_create
 - GET /support/queue — chat_api_v1_support_queue_list
 
-## Error codes (61) — the StapelError envelope
+## Error codes (65) — the StapelError envelope
 Render `t(code, params)`; branch UX on the remediation. Localized text lives in docs/errors.<lang>.md, not here.
 - error.400.bad_request [400] fix_input
 - error.400.captcha_invalid [400] retry
@@ -132,6 +149,7 @@ Render `t(code, params)`; branch UX on the remediation. Localized text lives in 
 - error.400.chat_attachments_disabled [400] fix_input
 - error.400.chat_body_too_long [400] fix_input
 - error.400.chat_empty_message [400] fix_input
+- error.400.chat_incomplete_subject [400] fix_input
 - error.400.chat_invalid_attachment [400] fix_input
 - error.400.chat_invalid_direct [400] fix_input
 - error.400.chat_invalid_kind [400] fix_input
@@ -142,6 +160,7 @@ Render `t(code, params)`; branch UX on the remediation. Localized text lives in 
 - error.400.chat_not_support [400] fix_input
 - error.400.chat_unknown_activity_state [400] fix_input
 - error.400.chat_unknown_attachment_type [400] fix_input
+- error.400.chat_unknown_subject_type [400] fix_input
 - error.400.expected_list [400] fix_input
 - error.400.field.blank [400] fix_input {field}
 - error.400.field.does_not_exist [400] fix_input {field}
@@ -163,6 +182,7 @@ Render `t(code, params)`; branch UX on the remediation. Localized text lives in 
 - error.403.chat_not_author [403] retry
 - error.403.chat_not_operator [403] retry
 - error.403.chat_not_participant [403] retry
+- error.403.chat_send_refused [403] retry
 - error.403.forbidden [403] retry
 - error.403.network_blocked [403] contact_support
 - error.403.verification_enrollment_required [403] verify
@@ -186,4 +206,5 @@ Render `t(code, params)`; branch UX on the remediation. Localized text lives in 
 - error.429.rate_limit [429] wait_and_retry {retry_after_minutes}
 - error.429.too_many_requests [429] wait_and_retry
 - error.500.internal [500] contact_support
+- error.503.chat_blocks_unavailable [503] retry
 - error.503.mandate_unavailable [503] retry

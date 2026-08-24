@@ -4,6 +4,153 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-24
+
+### ⚠️ BREAKING — a direct thread's identity now includes what it is ABOUT
+
+**Read this before upgrading: it changes what `create_direct` returns.**
+
+Through 0.5.x a direct conversation was keyed by an order-independent hash of
+the participant PAIR and uniquely constrained on it. One buyer and one seller
+could therefore hold **exactly one thread, forever**, however many things they
+discussed. A buyer asking about a second listing landed in the conversation
+about the first — under the first one's header.
+
+Nobody could work around that correctly, and the module that tried says so
+plainly. stapel-classified could not refuse the second listing, *because
+refusing it would have rendered the wrong card*, so it made its own
+conversation binding **append-only with several subjects per conversation**
+and picked which to show. That table exists only because of this defect and is
+marked for deletion now that this has shipped.
+
+`direct_key` is now computed over `(scope, {both user ids}, subject_type,
+subject_key)`.
+
+**What happens to threads that already exist — the important part.**
+
+- **Nothing is migrated, and nothing is lost.** The subject segments are
+  appended to the key *only when there is a subject*, so a subject-less key is
+  **byte-identical** to the one 0.5.x produced. Every conversation that exists
+  today keeps its id, its messages, its participants and its key, and an
+  unchanged `create_direct(owner=…, other_user_id=…)` still returns it.
+  `tests/test_subjects.py::test_a_subjectless_key_is_byte_identical_to_the_old_one`
+  is that guarantee, asserted rather than trusted — had it drifted by one
+  byte, the module would have opened a silent second thread beside every live
+  one.
+- **An existing thread is the pair's "about nothing in particular" thread.**
+  That is now a real, permanent category, not a placeholder.
+- **The first subject-bearing contact after the upgrade opens a NEW thread**
+  rather than adopting the pair's existing one. This is deliberate: the old
+  thread genuinely is not about that subject, and quietly relabelling it would
+  put a listing's header over a conversation that predates it. A deployment
+  that would rather adopt an existing thread must decide *which* subject it
+  was about — a question only that product can answer, which is exactly why
+  this module does not answer it. Expect users with existing correspondents to
+  see one additional thread appear the first time a subject is used.
+- Migration `0004` is expand-only: two blank-defaulted columns, one widened
+  `CharField` (`direct_key` 600 → 900), one index. No backfill, no rewrite, no
+  drop.
+
+### Added — subjects: what a conversation is about, with the card inlined
+
+- **`subject_type` / `subject_key` on a conversation** — an opaque pair, never
+  parsed here. It is moderation's `(target_type, target_key)` idiom for the
+  same reason: the pair is a NAME, and a messaging engine that learned what a
+  listing is would be the wrong place for that knowledge.
+- **`STAPEL_CHAT["SUBJECT_TYPES"]`** — merge-over-builtins registry
+  (`subjects.py`), **shipping EMPTY**. A generic chat has no subject types,
+  and the obvious one (`listing`) belongs to whoever owns listings. Settings
+  ← runtime, `None` removes, same semantics as the attachment and activity
+  registries. Each policy names a **`card_function`**; a policy without one is
+  refused at registration and `stapel_chat.E020` at boot.
+- **Cards are batched, and designed to `classified.subject_cards`** —
+  `{keys: [...]} → {cards: {key: card}}`, one call per subject type for a
+  whole page, never one per conversation. The card is passed through
+  untouched. A provider that answers a deleted subject with a `gone` card
+  (which classified's contract requires) simply works; a provider that
+  *omits* a key it was asked about is reported as a degraded card, because
+  rendering that as "no subject" would hide a broken provider behind a
+  plausible header.
+- **Degradation is data**: every subject carries `meta_status` /
+  `meta_reason` (`subject_type_unregistered`, `card_function_unreachable`,
+  `card_function_failed`, `card_missing`) in the attachment vocabulary. A
+  conversation never fails to open because a catalogue blinked.
+- Creating a conversation with an **unregistered** subject type is refused
+  (400 `chat_unknown_subject_type`), and half a subject — a type without a key
+  or vice versa — is refused too (400 `chat_incomplete_subject`).
+
+### Added — `chat.conversation.created`
+
+A thread was opened. Written into the outbox in the same transaction as the
+row, and emitted **only on a real create** — an idempotent `create_direct`
+that returned an existing thread is not one, and a consumer that bound a
+domain object per idempotent retry would be right to double-bind.
+
+Before this, nothing downstream could react to a new conversation at all: a
+consumer learned one existed when its first message arrived on `chat.message`.
+That is the entire reason stapel-classified's binding was **client-driven** —
+a client telling the server what had happened, in a fleet that is otherwise
+server-authoritative about exactly this.
+
+### Added — `chat.conversation_participants`
+
+Who is a party to these conversations, batched, with each thread's kind and
+subject. stapel-classified stored `initiator_id`/`counterparty_id` on its own
+row **only** because chat exposed no way to ask; a copy nothing can refresh
+goes stale the moment a participant changes here.
+
+Every id supplied is answered, including one that names nothing
+(`{"exists": false}`) or is not a well-formed id at all — the same rule
+`classified.subject_cards` follows for a deleted listing: a caller holding a
+dead id must be told, not left to infer it from an absence. Deliberately **not**
+a permission check: it answers who is a party, and what that entitles them to
+is the caller's policy.
+
+### SECURITY — a block now stops a send, not just a new conversation
+
+A block that only refuses NEW conversations is **half a block**: nothing
+stopped the next message in a thread that already existed. Enforced in the
+service layer, so it covers the socket — the canonical send path since 0.3.0 —
+and not only REST.
+
+The provider is asked **by name, never imported**:
+`STAPEL_CHAT["BLOCK_FUNCTION"]`, default `profiles.relationships`
+(stapel-profiles), `{"pairs": [[a, b], …]} → {"blocked": [[a, b], …]}`, either
+direction. Chat and the block owner stay independently deployable, and this
+shipped without waiting on that module.
+
+- **The refusal discloses nothing.** 403 `error.403.chat_send_refused` — a key
+  that does not name a block, from an exception that carries no reason and no
+  direction and must never grow either. Telling the blocked party "they
+  blocked you" turns a quiet boundary into a notification.
+- **A provider that is present and FAILING answers 503, never "allowed".**
+  `BlockCheckUnavailable` → `error.503.chat_blocks_unavailable`, deliberately
+  *not* a `ChatError`, so a 503 can never be caught as a 403. This is
+  stapel-classified's precedent kept identical, so the two modules cannot
+  disagree about what an unreachable block store means. An outage is not
+  consent; failing open would deliver a message to somebody who blocked the
+  sender, and they would never know.
+- **`BLOCK_ENFORCEMENT`** — `auto` (enforce when a provider is reachable;
+  `W003` says so at every boot when none is), `required` (an unreachable
+  provider is `E017` at check time and 503 at send), `off` (a decision on the
+  record, `W004`). "Blocks are not enforced here" is a sentence an operator
+  reads, never something they discover.
+- **Direct threads only.** A group room is somebody else's convening and
+  silently dropping one member's messages out of it is a different product; a
+  support thread is never checked, because an operator is not a peer and a
+  customer must not be able to mute the help desk by blocking an agent. Both
+  exclusions are asserted by tests so neither can drift into an accident.
+
+### Changed
+
+- **Floor: `stapel-core>=0.45.0`** (was 0.43.0).
+- New checks: `E017`/`W003`/`W004` (block enforcement), `E018` (an
+  unrecognized enforcement mode — not a thing to leave implicit for a security
+  control), `E020`/`W005` (subject types and their card functions).
+- `ConversationResponse` gains `subject` (null on a thread about nothing in
+  particular); `CreateConversationRequest` gains `subject_type`/`subject_key`.
+  Both are additive — an existing client keeps working unchanged.
+
 ## [0.5.1] - 2026-08-24
 
 *(0.5.0 was tagged and never reached PyPI: its moderation-seam tests imported

@@ -16,6 +16,8 @@ the durable rows by ``seq``.
 """
 from __future__ import annotations
 
+import uuid
+
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -24,6 +26,11 @@ from stapel_core.comm import mutate_and_emit
 from . import realtime
 from .activity import resolve_activity
 from .attachments import prepare_attachments
+# Re-exported deliberately: every caller catches this module's refusals as
+# `services.X`, and a view that had to import three modules to handle one send
+# would grow a fourth the next time a seam moved.
+from .blocks import BlockCheckUnavailable, blocked_pairs  # noqa: F401
+from .subjects import UnknownSubjectType, resolve_subject_type  # noqa: F401
 from .models import (
     Conversation,
     ConversationKind,
@@ -80,28 +87,81 @@ class NotEditable(ChatError):
     """A system line, or a message past its EDIT_WINDOW_S."""
 
 
+class IncompleteSubject(ChatError):
+    """Half a subject — a type without a key, or a key without a type."""
+
+
+class SendRefused(ChatError):
+    """This sender may not send into this thread.
+
+    Raised where a block stands between the sender and the other party. It
+    carries **no reason and no direction**, and it must never grow either: the
+    whole point of a block is that the blocked party is not told about it, and
+    an exception with a `reason` attribute is an exception whose reason ends
+    up in a response body eventually. What the sender sees is indistinguishable
+    from any other closed door.
+    """
+
+
 # ── Conversation creation ───────────────────────────────────────────────
 
 
-def create_direct(*, owner, other_user_id, scope_key: str = "") -> Conversation:
-    """Get-or-create the direct thread between ``owner`` and ``other_user_id``.
+def create_direct(
+    *,
+    owner,
+    other_user_id,
+    scope_key: str = "",
+    subject_type: str = "",
+    subject_key: str = "",
+) -> Conversation:
+    """Get-or-create the direct thread between ``owner`` and ``other_user_id``
+    **about** ``(subject_type, subject_key)``.
 
-    Idempotent by ``(scope_key, {owner, other})`` — a second call for the same
-    pair (in either order) returns the existing thread rather than a duplicate.
-    The race between two concurrent first-creates is resolved by the partial
-    unique constraint on ``direct_key``: the loser catches the IntegrityError
-    and returns the winner's row.
+    Idempotent by ``(scope_key, {owner, other}, subject)`` — a second call for
+    the same pair and the same subject (in either order) returns the existing
+    thread rather than a duplicate. The race between two concurrent
+    first-creates is resolved by the partial unique constraint on
+    ``direct_key``: the loser catches the IntegrityError and returns the
+    winner's row.
+
+    **The subject is part of the identity, and that is the change 0.6.0 is
+    for.** Through 0.5.x the key was the pair alone, so two people had exactly
+    one thread between them forever: a buyer asking about a second listing
+    landed in the conversation about the first, under the first one's header.
+    Every consumer that cared had to keep its own table mapping many subjects
+    onto that one thread and pick which to render. Now the second listing is
+    its own thread, and the pair-only thread is simply the one with no
+    subject — which every conversation created before this release is.
+
+    An unregistered ``subject_type`` is refused (:class:`UnknownSubjectType`):
+    a subject nothing can render is the defect this surface exists to close,
+    and storing one would push the failure to the moment somebody opens the
+    thread.
     """
-    key = _direct_key(scope_key, owner.pk, other_user_id)
+    subject_type = (subject_type or "").strip()
+    subject_key = (subject_key or "").strip()
+    if subject_type or subject_key:
+        # Both or neither. Half a subject renders as badly as a wrong one.
+        if not (subject_type and subject_key):
+            raise IncompleteSubject(
+                "a subject needs both subject_type and subject_key"
+            )
+        resolve_subject_type(subject_type)
+
+    key = _direct_key(scope_key, owner.pk, other_user_id, subject_type, subject_key)
     existing = Conversation.objects.filter(
         kind=ConversationKind.DIRECT, direct_key=key
     ).first()
     if existing is not None:
         return existing
     try:
-        with transaction.atomic():
+        with mutate_and_emit() as emit:
             conv = Conversation.objects.create(
-                kind=ConversationKind.DIRECT, scope_key=scope_key, direct_key=key
+                kind=ConversationKind.DIRECT,
+                scope_key=scope_key,
+                direct_key=key,
+                subject_type=subject_type,
+                subject_key=subject_key,
             )
             ConversationParticipant.objects.bulk_create(
                 [
@@ -109,6 +169,7 @@ def create_direct(*, owner, other_user_id, scope_key: str = "") -> Conversation:
                     ConversationParticipant(conversation=conv, user_id=other_user_id),
                 ]
             )
+            _emit_created(emit, conv, creator=owner)
         return conv
     except IntegrityError:
         # Lost the create race — return the winner's thread.
@@ -120,26 +181,80 @@ def create_direct(*, owner, other_user_id, scope_key: str = "") -> Conversation:
         raise
 
 
-def create_group(*, owner, participant_ids=None, scope_key: str = "") -> Conversation:
+def create_group(
+    *,
+    owner,
+    participant_ids=None,
+    scope_key: str = "",
+    subject_type: str = "",
+    subject_key: str = "",
+) -> Conversation:
     """Create a group thread with ``owner`` plus ``participant_ids`` (deduped).
-    Group threads are never deduplicated — each call is a new conversation."""
-    conv = Conversation.objects.create(
-        kind=ConversationKind.GROUP, scope_key=scope_key
-    )
-    _add_members(conv, owner, participant_ids or [])
+    Group threads are never deduplicated — each call is a new conversation, so
+    the subject here is a label rather than half of an identity."""
+    subject_type = (subject_type or "").strip()
+    subject_key = (subject_key or "").strip()
+    if subject_type or subject_key:
+        if not (subject_type and subject_key):
+            raise IncompleteSubject(
+                "a subject needs both subject_type and subject_key"
+            )
+        resolve_subject_type(subject_type)
+    with mutate_and_emit() as emit:
+        conv = Conversation.objects.create(
+            kind=ConversationKind.GROUP,
+            scope_key=scope_key,
+            subject_type=subject_type,
+            subject_key=subject_key,
+        )
+        _add_members(conv, owner, participant_ids or [])
+        _emit_created(emit, conv, creator=owner)
     return conv
 
 
 def create_support(*, customer, scope_key: str = "") -> Conversation:
     """Open a support thread for ``customer`` (unassigned, status=open) — it
     lands in the operator queue until an operator is assigned."""
-    conv = Conversation.objects.create(
-        kind=ConversationKind.SUPPORT,
-        scope_key=scope_key,
-        support_status=SupportStatus.OPEN,
-    )
-    ConversationParticipant.objects.create(conversation=conv, user=customer)
+    with mutate_and_emit() as emit:
+        conv = Conversation.objects.create(
+            kind=ConversationKind.SUPPORT,
+            scope_key=scope_key,
+            support_status=SupportStatus.OPEN,
+        )
+        ConversationParticipant.objects.create(conversation=conv, user=customer)
+        _emit_created(emit, conv, creator=customer)
     return conv
+
+
+def _emit_created(emit, conv: Conversation, creator=None) -> None:
+    """Write ``chat.conversation.created`` into the outbox, in the same
+    transaction as the row.
+
+    Before this existed nothing downstream could react to a new thread: a
+    consumer learned a conversation existed only when the first message
+    arrived on ``chat.message``, so every binding of a thread to a domain
+    object had to be driven from the client that created it — which is a
+    client telling the server what happened, in a fleet that is otherwise
+    server-authoritative about exactly this.
+
+    Emitted **only on a real create**. ``create_direct`` returning an existing
+    thread is not a creation, and a consumer that received one per idempotent
+    retry would be right to double-bind.
+    """
+    emit(
+        "chat.conversation.created",
+        {
+            "conversation_id": str(conv.id),
+            "kind": conv.kind,
+            "scope_key": conv.scope_key,
+            "subject_type": conv.subject_type,
+            "subject_key": conv.subject_key,
+            "creator_id": str(creator.pk) if creator is not None else None,
+            "participant_ids": _participant_ids(conv),
+            "created_at": conv.created_at.isoformat(),
+        },
+        key=str(conv.pk),
+    )
 
 
 def _add_members(conv: Conversation, owner, participant_ids) -> None:
@@ -186,6 +301,7 @@ def post_message(
     """
     if reply_to is not None and reply_to.conversation_id != conversation.pk:
         raise InvalidReply("reply_to is not a message of this conversation")
+    _refuse_if_blocked(conversation, sender)
     client_msg_id = (client_msg_id or "").strip()[:64]
     if client_msg_id:
         existing = Message.objects.filter(
@@ -214,6 +330,43 @@ def post_message(
                     return twin
             continue
     raise last_err  # pragma: no cover - exhausted retries
+
+
+def _refuse_if_blocked(conv: Conversation, sender) -> None:
+    """Refuse a send that a block stands in the way of.
+
+    Enforced here, in the service, rather than in a view — because the socket
+    is the canonical send path since 0.3.0 and a check that lived only in REST
+    would be a block that stops nothing anybody actually does.
+
+    **Direct threads only, and never support.** A block is a fact between two
+    people; a group room is somebody else's convening and dropping one
+    member's messages out of it silently is a different product. A support
+    thread is never checked: an operator is not a peer, and a customer who
+    blocked an agent would otherwise have muted the help desk.
+
+    Raises :class:`SendRefused` (403, disclosing nothing) when blocked, and
+    lets :class:`~stapel_chat.blocks.BlockCheckUnavailable` (503) travel
+    untouched when the provider is present and failing. Those two must never
+    collapse into one another: a 403 for an outage tells a sender they are
+    blocked when they are not, and a delivered message for an outage is the
+    provider failing OPEN.
+    """
+    if sender is None or conv.kind != ConversationKind.DIRECT:
+        return
+    others = [
+        str(uid)
+        for uid in ConversationParticipant.objects.filter(conversation=conv)
+        .exclude(user_id=sender.pk)
+        .values_list("user_id", flat=True)
+    ]
+    if not others:
+        return
+    pairs = [(str(sender.pk), other) for other in others]
+    hits = blocked_pairs(pairs)
+    for a, b in pairs:
+        if frozenset((a, b)) in hits:
+            raise SendRefused()
 
 
 def _participant_ids(conv: Conversation) -> list:
@@ -706,4 +859,92 @@ def moderation_content(message_id) -> dict:
         "seq": message.seq,
         "edited": message.edited_at is not None,
         "created_at": message.created_at.isoformat(),
+    }
+
+
+# ── Reads other modules need (comm) ─────────────────────────────────────
+
+
+def conversation_participants(conversation_ids) -> dict:
+    """``[conversation_id, …] -> {id: {exists, kind, subject, participants}}``.
+
+    The read stapel-classified stored ``initiator_id`` / ``counterparty_id``
+    on its own row to avoid making, because chat exposed no way to ask *"is
+    this user a party to this conversation"* — so a module that already knew
+    the conversation id still had to keep its own copy of who was in it, and
+    that copy could be wrong the moment anything changed here.
+
+    **Batch, and it answers for every id it was asked about.** An id that names
+    no conversation comes back ``{"exists": false}`` rather than being dropped,
+    for the same reason ``classified.subject_cards`` answers a deleted listing
+    with a ``gone`` card: the caller is holding that id for a reason and needs
+    to be told it is dead, not left to infer it from an absence.
+
+    Deliberately NOT a permission check. It answers *who is a party*; whether
+    that means the caller may do a thing is the caller's rule, and a helper
+    named ``can_x`` here would be this module deciding another module's policy.
+    """
+    wanted = [str(cid) for cid in (conversation_ids or []) if str(cid or "").strip()]
+    if not wanted:
+        return {}
+
+    valid, out = [], {}
+    for cid in wanted:
+        try:
+            uuid.UUID(cid)
+        except (ValueError, AttributeError, TypeError):
+            # A malformed id is "no such conversation", not a 500 — the same
+            # rule moderation_content applies to a key that is not an id.
+            out[cid] = {"exists": False, "kind": "", "subject_type": "",
+                        "subject_key": "", "scope_key": "", "participants": []}
+            continue
+        valid.append(cid)
+
+    rows = {
+        str(c.id): c
+        for c in Conversation.objects.filter(id__in=valid).prefetch_related(
+            "participants"
+        )
+    }
+    for cid in valid:
+        conv = rows.get(cid)
+        if conv is None:
+            out[cid] = {"exists": False, "kind": "", "subject_type": "",
+                        "subject_key": "", "scope_key": "", "participants": []}
+            continue
+        out[cid] = {
+            "exists": True,
+            "kind": conv.kind,
+            "scope_key": conv.scope_key,
+            "subject_type": conv.subject_type,
+            "subject_key": conv.subject_key,
+            "participants": [
+                {"user_id": str(p.user_id), "role": p.role}
+                for p in conv.participants.all()
+            ],
+        }
+    return out
+
+
+def subject_cards_for(conversations) -> dict:
+    """``[Conversation, …] -> {conversation_id: resolution}`` — one call per
+    subject type for the whole list, never one per conversation.
+
+    A conversation with no subject is simply absent from the answer; that is
+    not a degradation, it is a thread about nothing in particular.
+    """
+    from .subjects import resolve_cards
+
+    pairs = {
+        (c.subject_type, c.subject_key)
+        for c in conversations
+        if c.subject_type and c.subject_key
+    }
+    if not pairs:
+        return {}
+    resolved = resolve_cards(pairs)
+    return {
+        str(c.id): resolved[(c.subject_type, c.subject_key)]
+        for c in conversations
+        if (c.subject_type, c.subject_key) in resolved
     }
