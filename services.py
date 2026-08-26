@@ -92,14 +92,21 @@ class IncompleteSubject(ChatError):
 
 
 class SendRefused(ChatError):
-    """This sender may not send into this thread.
+    """This party may not do that here — the module's ONE refusal.
 
-    Raised where a block stands between the sender and the other party. It
-    carries **no reason and no direction**, and it must never grow either: the
-    whole point of a block is that the blocked party is not told about it, and
-    an exception with a `reason` attribute is an exception whose reason ends
-    up in a response body eventually. What the sender sees is indistinguishable
-    from any other closed door.
+    Raised where a block stands between two people: at send since 0.6.0, and
+    since 0.6.1 also when one of them tries to OPEN a new direct thread with
+    the other. Deliberately the same exception and the same error key in both
+    places. A second refusal vocabulary for the creation door would be a
+    second thing to disclose: a client that could tell "refused to open" from
+    "refused to send" could tell a block from a coincidence, which is exactly
+    what the non-disclosure rule exists to prevent.
+
+    It carries **no reason and no direction**, and it must never grow either:
+    the whole point of a block is that the blocked party is not told about it,
+    and an exception with a `reason` attribute is an exception whose reason
+    ends up in a response body eventually. What the refused party sees is
+    indistinguishable from any other closed door.
     """
 
 
@@ -137,6 +144,28 @@ def create_direct(
     a subject nothing can render is the defect this surface exists to close,
     and storing one would push the failure to the moment somebody opens the
     thread.
+
+    **A block refuses a NEW thread and never an existing one — 0.6.1.** The
+    two halves of this verb are not the same act, and the distinction is the
+    whole of the change:
+
+    * Opening a thread that does not exist yet is a WRITE, and a blocked pair
+      may not perform it. Through 0.6.0 they could: the block only reached the
+      send path, so a blocked buyer opened the thread, typed, pressed Enter
+      and discovered the wall there. Every consumer that wanted the door shut
+      earlier had to keep its own pre-creation check — which is the door
+      stapel-classified is deleting now that this exists.
+    * Returning a thread that already exists is a READ of history, and **a
+      block never deletes history** — the fleet's standing rule. Both parties
+      keep seeing everything already said to each other; neither can add to
+      it, because the send path (0.6.0) still refuses. Refusing here instead
+      would take a conversation away from two people as a side effect of one
+      of them tapping "block", and neither of them asked for that.
+
+    So the provider is consulted **only on the create branch**, after the
+    lookup has already failed to find a thread. A pair with an existing thread
+    costs no block call at all — which also means an outage in the block store
+    can never stand between somebody and their own correspondence.
     """
     subject_type = (subject_type or "").strip()
     subject_key = (subject_key or "").strip()
@@ -153,7 +182,12 @@ def create_direct(
         kind=ConversationKind.DIRECT, direct_key=key
     ).first()
     if existing is not None:
+        # A read of history. No block call, and therefore no way for the block
+        # store's availability to stand between two people and what they
+        # already said. See the docstring: this branch is the point of 0.6.1
+        # as much as the refusal below is.
         return existing
+    _refuse_if_pair_blocked(owner.pk, other_user_id)
     try:
         with mutate_and_emit() as emit:
             conv = Conversation.objects.create(
@@ -330,6 +364,24 @@ def post_message(
                     return twin
             continue
     raise last_err  # pragma: no cover - exhausted retries
+
+
+def _refuse_if_pair_blocked(user_a, user_b) -> None:
+    """Refuse to OPEN a direct thread between two people a block separates.
+
+    The creation half of the same rule ``_refuse_if_blocked`` states for the
+    send path, and it obeys the same three: the refusal is
+    :class:`SendRefused` — the very same exception and error key a refused
+    send raises, so the two doors are not distinguishable from outside — it
+    carries no direction, and :class:`BlockCheckUnavailable` travels untouched
+    so a failing provider answers 503 rather than opening the thread.
+
+    Only ever called where a thread is about to be **created**. Returning one
+    that already exists does not come through here, deliberately.
+    """
+    pair = (str(user_a), str(user_b))
+    if frozenset(pair) in blocked_pairs([pair]):
+        raise SendRefused()
 
 
 def _refuse_if_blocked(conv: Conversation, sender) -> None:

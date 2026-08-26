@@ -353,30 +353,58 @@ one, which is what lets every existing conversation keep its identity.
 
 ### 9. Block enforcement — a provider named, never imported (`blocks.py`)
 
-A block that only refuses NEW conversations is half a block; the send path is
-this module's. Enforced in the **service layer**, so it covers the socket —
-the canonical send path since 0.3.0 — and not only REST.
+**Both doors, since 0.6.1.** A block that only refuses NEW conversations is
+half a block, and 0.6.0's block that only refused SENDS was the other half: a
+blocked buyer opened the thread, typed, and met the wall on Enter. Chat now
+holds both, which is why a composite can delete its own pre-creation door —
+stapel-classified's is going.
+
+Enforced in the **service layer**, so it covers the socket — the canonical
+send path since 0.3.0 — and not only REST.
 
 `STAPEL_CHAT["BLOCK_FUNCTION"]` (default `profiles.relationships`) is asked by
 name: `{"pairs": [[a, b], ...]} -> {"blocked": [[a, b], ...]}`, either
 direction. No import edge is created between two modules that must stay
 independently deployable.
 
+| Act | Blocked pair |
+|---|---|
+| `create_direct` opens a thread that does not exist | **refused** (403) |
+| `create_direct` returns a thread that already exists | **allowed** — no provider call at all |
+| `post_message` into any direct thread | **refused** (403) |
+
+**That middle row is the design, not an oversight.** Creating is a write;
+returning the pair's existing thread is a READ of history, and across this
+fleet a block never deletes history. Both parties keep seeing what was already
+said; neither can add to it. Collapsing the two rows either way is a defect —
+refuse-always takes a conversation off two people as a side effect of one tap,
+allow-always reopens the door the enforcement exists to close. Both directions
+are asserted (`tests/test_blocks.py`). A consequence worth stating: since the
+idempotent branch never calls the provider, **no outage of the block store can
+stand between somebody and their own correspondence**.
+
 | `BLOCK_ENFORCEMENT` | Provider reachable | Provider absent | Provider failing |
 |---|---|---|---|
-| `auto` (default) | enforced | delivered, `W003` at boot | **503** |
+| `auto` (default) | enforced | allowed, `W003` at boot | **503** |
 | `required` | enforced | **503**, `E017` at boot | **503** |
 | `off` | not asked, `W004` | not asked, `W004` | not asked, `W004` |
 
+The default stays `auto`, deliberately: a generic messaging library deployed
+without stapel-profiles must not 503 on every conversation. A composite that
+knows it has blocks sets `required` itself.
+
 Three rules that do not bend:
 
-1. **A refusal discloses nothing.** 403 with a key that does not name a block,
-   from an exception carrying no reason and no direction — and it must never
-   grow either. Telling the blocked party turns a quiet boundary into a
-   notification.
+1. **A refusal discloses nothing, and there is only ONE refusal.** Both doors
+   raise `SendRefused` → 403 `error.403.chat_send_refused` — a key that does
+   not name a block, from an exception carrying no reason and no direction,
+   and it must never grow either. A second vocabulary for the creation door
+   would itself be a disclosure: a client that could tell "refused to open"
+   from "refused to send" could tell a block from a coincidence.
 2. **A provider present and failing is a 503, never "allowed".**
    `BlockCheckUnavailable` is deliberately not a `ChatError`, so a 503 cannot
-   be caught as a 403. An outage is not consent.
+   be caught as a 403. An outage is not consent — and it never opens a thread
+   either.
 3. **Direct threads only.** A group room is somebody else's convening;
    a support thread is never checked, because an operator is not a peer and a
    customer must not be able to mute the help desk. Both are asserted by tests.
@@ -393,7 +421,7 @@ Three rules that do not bend:
 | Consume | `user.deleted` | `{user_id, ...}` | `schemas/consumes/user.deleted.json` |
 | Function | `chat.moderation_content` | in `{message_id}` → out `{text, title, language, media[], author_id, url, kind, conversation_id, conversation_kind, scope_key, seq, edited, created_at}` | `schemas/functions/chat.moderation_content.json` |
 | Function | `chat.conversation_participants` | in `{conversation_ids[]}` → out `{conversations: {id: {exists, kind, scope_key, subject_type, subject_key, participants[{user_id, role}]}}}` — every id asked about is answered, `exists: false` included | `schemas/functions/chat.conversation_participants.json` |
-| Call | `profiles.relationships` | out `{pairs: [[a, b], …]}` → in `{blocked: [[a, b], …]}` — consulted on every send into a direct thread, **by name, never imported** | owned by stapel-profiles |
+| Call | `profiles.relationships` | out `{pairs: [[a, b], …]}` → in `{blocked: [[a, b], …]}` — consulted on every send into a direct thread and before a NEW direct thread is opened (never when an existing one is returned), **by name, never imported** | owned by stapel-profiles |
 | Call | *(a subject type's `card_function`)* | out `{keys: [...]}` → in `{cards: {key: card}}` — batched, one call per subject type per page | owned by the provider, e.g. `classified.subject_cards` |
 | Signal | `chat.read` | `{conversation_id, user_id, last_read_seq}` | ephemeral — no schema, no outbox |
 | Signal | `chat.delivered` | `{conversation_id, user_id, last_delivered_seq}` | ephemeral |

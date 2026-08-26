@@ -523,11 +523,11 @@ def check_block_enforcement(app_configs, **kwargs):
     if mode == ENFORCEMENT_OFF:
         return [
             checks.Warning(
-                "STAPEL_CHAT['BLOCK_ENFORCEMENT'] is 'off': a blocked user "
-                "may send into an existing direct thread in this deployment. "
-                "New-conversation refusals elsewhere in the fleet still "
-                "apply, but a block that only stops NEW conversations is half "
-                "a block.",
+                "STAPEL_CHAT['BLOCK_ENFORCEMENT'] is 'off': in this deployment "
+                "a blocked user may open a direct thread with whoever blocked "
+                "them, and may send into one. Both doors are unlocked — "
+                "since 0.6.1 this module holds them both, so nothing else in "
+                "the fleet is covering for this setting.",
                 hint="Set it to 'auto' (enforce when a provider is reachable) "
                      "or 'required' (refuse to run without one).",
                 id="stapel_chat.W004",
@@ -542,10 +542,12 @@ def check_block_enforcement(app_configs, **kwargs):
         return [
             checks.Error(
                 f"STAPEL_CHAT['BLOCK_ENFORCEMENT'] is 'required' and the "
-                f"block provider {name!r} is not reachable: {reason}. Sends "
-                "into direct threads will answer 503 until it is — which is "
-                "the correct behaviour for 'required' and a broken "
-                "deployment either way.",
+                f"block provider {name!r} is not reachable: {reason}. Opening "
+                "a NEW direct thread and sending into one will both answer "
+                "503 until it is — which is the correct behaviour for "
+                "'required' and a broken deployment either way. Returning a "
+                "thread that already exists is unaffected: that is a read of "
+                "history, and it asks the provider nothing.",
                 hint="Install/mount the provider (stapel-profiles serves "
                      "'profiles.relationships'), repoint "
                      "STAPEL_CHAT['BLOCK_FUNCTION'], or drop to 'auto'.",
@@ -556,7 +558,8 @@ def check_block_enforcement(app_configs, **kwargs):
         checks.Warning(
             f"Block enforcement is 'auto' and the block provider {name!r} is "
             f"not reachable from this process: {reason}. Blocks are NOT "
-            "enforced on the send path in this deployment.",
+            "enforced in this deployment — neither on the send path nor when "
+            "a new direct thread is opened.",
             hint="Expected while the provider is a separate service reached "
                  "over the bus, or before it ships. Set 'required' to make "
                  "its absence a boot failure instead of an advisory.",

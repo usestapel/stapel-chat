@@ -4,6 +4,88 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-08-26
+
+### SECURITY — a block now refuses the thread, not just the message
+
+**A behaviour tightening on an existing verb: `create_direct` can now refuse.**
+Nothing about its signature or its return changed, and no caller has to change
+anything — but a call that always succeeded before can now raise, so read this
+before upgrading.
+
+0.6.0 enforced blocks at **send**. The consequence was a door left ajar: a
+blocked buyer could still open a thread with a seller who had blocked them,
+type a message, press Enter and only *then* be refused. Composites that wanted
+that shut earlier had to keep a pre-creation block check of their own —
+stapel-classified's "contact the seller" door existed partly for this, is
+recorded there as ask #5, and **is deleted by its next patch now that this has
+shipped.** That deletion is the consumer-visible point of this release.
+
+`create_direct` consults `STAPEL_CHAT["BLOCK_FUNCTION"]` (default
+`profiles.relationships`, asked by name, never imported) before creating a new
+direct conversation, and refuses if the pair is blocked in either direction.
+
+### The distinction this release is actually about — create vs return
+
+`create_direct` is idempotent: it returns the pair's existing thread. Those
+two branches are **not** the same act and are not treated the same.
+
+| Act | Blocked pair | Why |
+|---|---|---|
+| opening a thread that does not exist | **refused** | it is a write, and it is the door the ask exists to close |
+| returning a thread that already exists | **allowed** | it is a READ of history, and across this fleet **a block never deletes history** |
+
+Both parties keep seeing everything already said to each other; neither can add
+to it, because the send enforcement from 0.6.0 still refuses. What a client
+renders for a blocked pair with history is an open thread with no composer.
+
+Collapsing the two rows in either direction is a defect, and both directions
+are asserted rather than trusted: refuse-always would take a conversation off
+two people as a side effect of one of them tapping "block", and allow-always
+would reopen the door. `tests/test_blocks.py::TestReturningAnExistingThread`
+fails a refuse-always implementation; `TestCreatingANewThread` fails 0.6.0.
+
+A property that follows from the ordering — the existence lookup runs first and
+the provider is asked only on the create branch — is that **no outage of the
+block store can ever stand between somebody and their own correspondence.**
+
+### One refusal vocabulary, not two
+
+The creation refusal **is** the send refusal: the same `services.SendRefused`,
+the same 403 `error.403.chat_send_refused`, a key that names no block, no
+direction, no blocker identity. A second key for the creation door would itself
+be a disclosure — a client that could tell "refused to open" from "refused to
+send" could tell a block from a coincidence, which is the whole thing
+non-disclosure exists to prevent.
+
+### The availability posture is unchanged, and now covers both doors
+
+A provider that is present and **failing** answers 503
+(`error.503.chat_blocks_unavailable`), never a created thread.
+`BlockCheckUnavailable` remains deliberately **not** a `ChatError`, so a 503
+can never be caught as a 403 — asserted at the new door too. An outage is not
+consent, and it does not open a thread either.
+
+`BLOCK_ENFORCEMENT` keeps its default of **`auto`**, for 0.6.0's reason
+unchanged: a generic messaging library deployed without stapel-profiles must
+not 503 on every conversation. A composite that knows it has blocks sets
+`required` itself, as stapel-classified does. `off` is still a decision on the
+record — its `W004` text now says plainly that *both* doors are unlocked, since
+nothing else in the fleet is covering for that setting any more.
+
+### Unchanged
+
+- **Group and support threads are not checked**, at creation any more than at
+  send. A group room is somebody else's convening; an operator is not a peer,
+  and a customer must not be able to mute the help desk.
+- **The send path.** No change to `post_message`; its tests are untouched and
+  still green.
+- **`chat.conversation.created`** is still emitted only on a real create — a
+  refused create emits nothing, and a returned thread never did.
+- **stapel-core floor stays `>=0.45.0`.** 0.46.0 adds the `verification` drop
+  verbs (`drop_challenge`, `drop_verification_token`, `revoke_grants`); chat
+  uses none of them, and nothing this module relies on moved.
+
 ## [0.6.0] - 2026-08-24
 
 ### ⚠️ BREAKING — a direct thread's identity now includes what it is ABOUT

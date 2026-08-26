@@ -1,12 +1,23 @@
-"""Block enforcement at the one place it was still missing: the send path.
+"""Block enforcement on both doors a block has to hold: opening a thread, and
+sending into one.
 
 A user-to-user block is **not** a chat concept and this module does not own
 one. stapel-profiles has owned it since 0.4.x — ``UserRelationship`` with a
 ``blocked`` status and a REST surface to set it. What the fleet has never had
 is a server that consults it: stapel-classified made the block hold at *new
 conversation* creation, and said so plainly — *"a block that only stops NEW
-conversations is half a block; the send path is chat's"*. This file is the
-other half.
+conversations is half a block; the send path is chat's"*. 0.6.0 built that
+half. 0.6.1 takes the other one over as well, so a composite no longer keeps a
+pre-creation door of its own.
+
+**The two doors are not symmetrical, and the asymmetry is the design.** A
+block refuses a thread that does not exist yet, and never one that does.
+Creating is a write; *returning* the pair's existing thread is a read of
+history, and across this fleet a block never deletes history. Both parties go
+on seeing what was already said; neither can add to it, because the send path
+still refuses. Collapsing that either way is the defect — refuse-always takes
+a conversation off two people as a side effect of one tap, allow-always
+reopens the door this exists to close.
 
 The provider is reached **by name, never imported**:
 ``profiles.relationships``, ``{"pairs": [[a, b], …]} -> {"blocked": [[a, b],

@@ -374,6 +374,21 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
             return StapelErrorResponse(400, ERR_400_UNKNOWN_SUBJECT_TYPE)
         except services.IncompleteSubject:
             return StapelErrorResponse(400, ERR_400_INCOMPLETE_SUBJECT)
+        except services.SendRefused:
+            # A block stands between these two and there is no thread yet.
+            # The SAME 403 and the same key a refused send answers with —
+            # never a second one. A client that could tell "refused to open"
+            # from "refused to send" could tell a block from a coincidence,
+            # and a key that named the block would announce it to the person
+            # it is against. Note this cannot be reached when the thread
+            # already exists: that is a read of history, and a block does not
+            # take history away.
+            return StapelErrorResponse(403, ERR_403_SEND_REFUSED)
+        except services.BlockCheckUnavailable:
+            # 503, never 403 and never a created thread. An outage is not
+            # consent: opening the thread anyway would put a blocked party in
+            # front of somebody who blocked them because a service blinked.
+            return StapelErrorResponse(503, ERR_503_BLOCKS_UNAVAILABLE)
 
         conv = (
             Conversation.objects.prefetch_related("participants")
