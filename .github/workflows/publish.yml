@@ -3,7 +3,6 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-  workflow_dispatch:
 
 jobs:
   test:
