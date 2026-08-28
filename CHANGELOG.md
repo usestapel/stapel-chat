@@ -4,6 +4,29 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] — 2026-08-28
+
+### A merge deleted the guest and their conversations went with it
+
+`user.merged` arrives when an anonymous visitor signs into a real account.
+This package now consumes it and moves the guest's participations, authored
+messages and any `assigned_operator` rows onto the survivor.
+
+Nothing consumed it before, so the guest row was deleted and every CASCADE
+foreign key died with it: a visitor who wrote to a seller and then signed in
+lost the conversation, silently.
+
+The consumer decides inside a transaction before any write, and the order is
+deliberate: a guest that owns nothing here returns quietly — which also covers
+the second delivery of an already-completed merge, so idempotency stays silent
+— and only a guest that owns something and a survivor with no local row yet
+raises, so the outbox redelivers rather than tearing the transfer in half.
+A test asserts the rows are still under the guest after such a raise, not
+merely that it raised.
+
+`direct_key` is recomputed for a moved thread, and a test pins that it is
+unchanged when the raise happens.
+
 ## [0.6.2] - 2026-08-28
 
 ### Fixed — `E017` now says what it cannot see

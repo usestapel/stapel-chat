@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "user.merged",
+  "description": "An anonymous guest account was absorbed into an existing account; the guest row ceases to exist. stapel-chat reassigns the guest's authored messages, conversation participations and operator assignments to the surviving account, folds read marks where both accounts sat in one thread, and recomputes the now-stale direct_key of every direct thread the guest was in.",
+  "type": "object",
+  "required": ["from_user_id", "into_user_id"],
+  "properties": {
+    "from_user_id":  { "type": "string", "format": "uuid" },
+    "into_user_id":  { "type": "string", "format": "uuid" },
+    "reason":        { "type": "string" }
+  },
+  "additionalProperties": true
+}

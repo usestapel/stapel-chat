@@ -22,6 +22,22 @@ def pytest_configure(config):
         from stapel_core.comm.schemas import autoload_schemas
         autoload_schemas()
 
+        # autoload_schemas only registers emits/ + functions/. Register the
+        # consumes/ contracts too so a test emitting an event we subscribe to
+        # is schema-validated against the documented shape, not delivered
+        # unchecked. (Same as stapel-listings' harness.)
+        import json
+        from pathlib import Path
+
+        from stapel_core.comm.registry import action_registry
+
+        consumes = Path(__file__).resolve().parent / "schemas" / "consumes"
+        for schema_file in sorted(consumes.glob("*.json")):
+            action_registry.register_schema(
+                schema_file.stem,
+                json.loads(schema_file.read_text(encoding="utf-8")),
+            )
+
 
 import pytest  # noqa: E402
 
