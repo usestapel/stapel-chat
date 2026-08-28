@@ -4,6 +4,37 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-08-28
+
+### Fixed — `E017` now says what it cannot see
+
+The boot check that fires when `BLOCK_ENFORCEMENT` is `required` and the
+provider is unreachable told an operator how to fix a *local* mount and
+nothing about the case this fleet actually deploys. Over a bus transport
+`function_unreachable_reason` cannot prove a remote provider is up — the
+subject IS the function name and there is no route table — so a green boot is
+not evidence, and a profiles service one release too old surfaces only at the
+first call. stapel-classified's own `E002` said that out loud and this one did
+not; the sentence is ported before that check is deleted, so the honesty is
+not lost with it.
+
+The hint now also names the floor explicitly — **`stapel-profiles >= 0.16.0`**
+is the first release serving `profiles.relationships` — instead of naming the
+package with no version. Text only: no behaviour, no signature, no id changes.
+
+### The promised deletion happened
+
+0.6.1 said stapel-classified's pre-creation block door "is deleted by its next
+patch now that this has shipped". It was: **stapel-classified 0.4.0** removes
+its `blocks.py`, its `BLOCK_ENFORCEMENT` / `BLOCK_FUNCTION` keys, its
+`E001`/`E002`/`W001`/`W002`, its `ContactRefused`, and the error keys
+`error.403.classified_contact_refused` /
+`error.503.classified_blocks_unavailable`. Both write doors are this module's
+alone now, and the composite's whole statement about blocking is the value
+`required` it sets on `STAPEL_CHAT["BLOCK_ENFORCEMENT"]` in its preset — one
+fact, one axis. That release floors itself at `stapel-chat>=0.6.1`, because
+against 0.6.0 the deletion would re-open the door.
+
 ## [0.6.1] - 2026-08-26
 
 ### SECURITY — a block now refuses the thread, not just the message

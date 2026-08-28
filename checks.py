@@ -548,9 +548,14 @@ def check_block_enforcement(app_configs, **kwargs):
                 "'required' and a broken deployment either way. Returning a "
                 "thread that already exists is unaffected: that is a read of "
                 "history, and it asks the provider nothing.",
-                hint="Install/mount the provider (stapel-profiles serves "
-                     "'profiles.relationships'), repoint "
-                     "STAPEL_CHAT['BLOCK_FUNCTION'], or drop to 'auto'.",
+                hint="stapel-profiles >= 0.16.0 is the first release serving "
+                     "'profiles.relationships': install/mount it here, or "
+                     "deploy that service on that floor FIRST and configure "
+                     "its function route; alternatively repoint "
+                     "STAPEL_CHAT['BLOCK_FUNCTION'], or drop to 'auto'. Over "
+                     "a bus transport this check CANNOT see a stale remote "
+                     "provider — confirm the floor is DEPLOYED, not merely "
+                     "pinned; a stale one is refused at the first call.",
                 id="stapel_chat.E017",
             )
         ]

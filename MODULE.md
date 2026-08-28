@@ -357,7 +357,8 @@ one, which is what lets every existing conversation keep its identity.
 half a block, and 0.6.0's block that only refused SENDS was the other half: a
 blocked buyer opened the thread, typed, and met the wall on Enter. Chat now
 holds both, which is why a composite can delete its own pre-creation door —
-stapel-classified's is going.
+stapel-classified's is **gone in its 0.4.0**, along with the settings axis
+that duplicated `BLOCK_ENFORCEMENT`. One fact, one axis, and it is this one.
 
 Enforced in the **service layer**, so it covers the socket — the canonical
 send path since 0.3.0 — and not only REST.
@@ -419,6 +420,7 @@ Three rules that do not bend:
 | Emit | `chat.support.assigned` | `{conversation_id, operator_id, scope_key}` | `schemas/emits/chat.support.assigned.json` |
 | Emit | `chat.conversation.created` | `{conversation_id, kind, scope_key, subject_type, subject_key, creator_id?, participant_ids[], created_at}` — **only on a real create**; an idempotent `create_direct` that returned an existing thread is not one | `schemas/emits/chat.conversation.created.json` |
 | Consume | `user.deleted` | `{user_id, ...}` | `schemas/consumes/user.deleted.json` |
+| Consume | `user.merged` | `{from_user_id, into_user_id, reason}` | `schemas/consumes/user.merged.json` — an anonymous guest absorbed into an existing account; messages, participations and operator assignments move to the survivor, read marks fold by `max()`, and a direct thread's stale `direct_key` is recomputed (a collision folds the guest's thread into the survivor's, appending messages after its high-water `seq`) |
 | Function | `chat.moderation_content` | in `{message_id}` → out `{text, title, language, media[], author_id, url, kind, conversation_id, conversation_kind, scope_key, seq, edited, created_at}` | `schemas/functions/chat.moderation_content.json` |
 | Function | `chat.conversation_participants` | in `{conversation_ids[]}` → out `{conversations: {id: {exists, kind, scope_key, subject_type, subject_key, participants[{user_id, role}]}}}` — every id asked about is answered, `exists: false` included | `schemas/functions/chat.conversation_participants.json` |
 | Call | `profiles.relationships` | out `{pairs: [[a, b], …]}` → in `{blocked: [[a, b], …]}` — consulted on every send into a direct thread and before a NEW direct thread is opened (never when an existing one is returned), **by name, never imported** | owned by stapel-profiles |

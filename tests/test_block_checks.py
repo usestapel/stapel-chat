@@ -53,6 +53,21 @@ class TestBlockChecks:
         settings.STAPEL_CHAT = {"BLOCK_ENFORCEMENT": "required"}
         assert _ids(check_block_enforcement(None)) == ["stapel_chat.E017"]
 
+    def test_e017_names_the_floor_and_what_it_cannot_see(self, settings):
+        """The two sentences an operator on a bus fleet needs (0.6.2).
+
+        A green boot is not evidence over a bus transport — the subject IS the
+        function name and there is no route table, so this check cannot see a
+        stale remote provider and must say so rather than imply otherwise.
+        And the floor is a version, not a package name: a profiles one release
+        too old fails at the first call, not here.
+        """
+        settings.STAPEL_CHAT = {"BLOCK_ENFORCEMENT": "required"}
+        hint = check_block_enforcement(None)[0].hint
+        assert "stapel-profiles >= 0.16.0" in hint
+        assert "CANNOT see a stale remote provider" in hint
+        assert "DEPLOYED, not merely" in hint
+
     def test_required_with_a_provider_is_silent(self, settings, provider):
         settings.STAPEL_CHAT = {"BLOCK_ENFORCEMENT": "required"}
         assert check_block_enforcement(None) == []
