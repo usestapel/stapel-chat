@@ -4,6 +4,42 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] — 2026-08-30
+
+### Fixed — a malformed id in an action payload was a poison pill
+
+`ValidationError` is not a `ValueError`. Django answers a key it cannot coerce
+to a column's type — a malformed UUID above all — with
+`django.core.exceptions.ValidationError`, which does **not** subclass
+`ValueError` or `TypeError`. The `user.deleted` / `user.merged` guards here
+caught only `(ValueError, TypeError)`, so a bad id walked straight through
+them, the handler raised, `consume_actions` re-raised to the bus, and the
+event came back forever: a redelivery loop over a payload no retry can repair,
+burning the consumer's retry budget while looking exactly like a downstream
+outage.
+
+The consumed contracts do not save anyone from this. They type an id as
+`{"type": "string"}` — and where they do say `format: uuid`, `jsonschema`
+does not enforce `format` unless a format checker is passed, which the comm
+registry does not do. A malformed id is a well-formed payload.
+
+`handle_user_deleted` (previously unguarded — the call went straight at
+`ChatGDPRProvider`) and `handle_user_merged` now catch `ValidationError`
+alongside `ValueError`/`TypeError` and take the same quiet path they always
+took for an id they have never seen.
+
+`user.merged` had a second door: the *from* id was probed under the guard but
+the survivor probe, `get_user_model().objects.filter(pk=into_user_id)`, sat
+outside it, so a malformed *into* id still escaped whenever the guest genuinely
+owned chat. That read moved inside the guarded block — still before the first
+write, so the "survivor not projected yet" path can no more leave a thread
+half-moved than it could before.
+
+`MergeTargetNotReady` is untouched: a survivor id that *parses* but has no row
+here still raises, because that one is a real ordering lag and redelivery does
+fix it.
+
+
 ## [0.7.0] — 2026-08-30
 
 ### "На связи" was never about the other person
