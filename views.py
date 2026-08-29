@@ -210,8 +210,15 @@ def subject_to_dto(conv: Conversation, resolution=None) -> SubjectResponse | Non
 
 
 def conversation_to_dto(
-    conv: Conversation, viewer_participant=None, subject_resolution=None
+    conv: Conversation,
+    viewer_participant=None,
+    subject_resolution=None,
+    presence=None,
 ) -> ConversationResponse:
+    # A page resolves presence once for every participant on it and passes the
+    # map in; a caller that passes none simply ships the offline default,
+    # which is the honest degradation (never a fabricated "online").
+    presence = presence or {}
     unread = (
         services.unread_count(conversation=conv, participant=viewer_participant)
         if viewer_participant is not None
@@ -241,6 +248,12 @@ def conversation_to_dto(
                 role=p.role,
                 last_read_seq=p.last_read_seq,
                 last_delivered_seq=p.last_delivered_seq,
+                online=bool(
+                    (presence.get(str(p.user_id)) or {}).get("online", False)
+                ),
+                last_seen_at=(presence.get(str(p.user_id)) or {}).get(
+                    "last_seen_at"
+                ),
             )
             for p in conv.participants.all()
         ],
@@ -312,11 +325,14 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
         # conversation would make a fifty-row inbox fifty round trips, which
         # is why the provider contract is a batch in the first place.
         cards = services.subject_cards_for(page)
+        # Same batching rule for presence: one query for every participant on
+        # the page, never one per row.
+        presence = services.presence_for(page)
         response_cls = self.get_response_serializer_class()
         items = [
             response_cls(
                 conversation_to_dto(
-                    c, _my_participant(c, request.user), cards.get(str(c.id))
+                    c, _my_participant(c, request.user), cards.get(str(c.id)), presence
                 )
             ).data
             for c in page
@@ -403,6 +419,7 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
                     conv,
                     _my_participant(conv, request.user),
                     cards.get(str(conv.id)),
+                    services.presence_for([conv]),
                 )
             ),
             status=status.HTTP_201_CREATED,
@@ -428,7 +445,12 @@ class ConversationDetailView(SerializerSeamMixin, APIView):
         response_cls = self.get_response_serializer_class()
         return StapelResponse(
             response_cls(
-                conversation_to_dto(conv, participant, cards.get(str(conv.id)))
+                conversation_to_dto(
+                    conv,
+                    participant,
+                    cards.get(str(conv.id)),
+                    services.presence_for([conv]),
+                )
             )
         )
 
@@ -683,11 +705,14 @@ class SupportQueueView(SerializerSeamMixin, APIView):
         # conversation would make a fifty-row inbox fifty round trips, which
         # is why the provider contract is a batch in the first place.
         cards = services.subject_cards_for(page)
+        # Same batching rule for presence: one query for every participant on
+        # the page, never one per row.
+        presence = services.presence_for(page)
         response_cls = self.get_response_serializer_class()
         items = [
             response_cls(
                 conversation_to_dto(
-                    c, _my_participant(c, request.user), cards.get(str(c.id))
+                    c, _my_participant(c, request.user), cards.get(str(c.id)), presence
                 )
             ).data
             for c in page
@@ -727,7 +752,13 @@ class SupportAssignView(SerializerSeamMixin, APIView):
         )
         response_cls = self.get_response_serializer_class()
         return StapelResponse(
-            response_cls(conversation_to_dto(conv, _my_participant(conv, request.user)))
+            response_cls(
+                conversation_to_dto(
+                    conv,
+                    _my_participant(conv, request.user),
+                    presence=services.presence_for([conv]),
+                )
+            )
         )
 
 
@@ -761,7 +792,13 @@ class _SupportTransitionView(SerializerSeamMixin, APIView):
         )
         response_cls = self.get_response_serializer_class()
         return StapelResponse(
-            response_cls(conversation_to_dto(conv, _my_participant(conv, request.user)))
+            response_cls(
+                conversation_to_dto(
+                    conv,
+                    _my_participant(conv, request.user),
+                    presence=services.presence_for([conv]),
+                )
+            )
         )
 
 

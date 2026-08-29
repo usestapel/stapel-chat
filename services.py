@@ -978,6 +978,21 @@ def conversation_participants(conversation_ids) -> dict:
     return out
 
 
+def presence_for(conversations) -> dict:
+    """``[Conversation, …] -> {user_id: {"online", "last_seen_at"}}``.
+
+    One query for every participant of a whole page, the same shape of read as
+    :func:`subject_cards_for` and for the same reason: a header that has to
+    ask per conversation is a header that will be asked fifty times.
+    """
+    from .presence import snapshot
+
+    user_ids = {
+        str(p.user_id) for c in conversations for p in c.participants.all()
+    }
+    return snapshot(user_ids)
+
+
 def subject_cards_for(conversations) -> dict:
     """``[Conversation, …] -> {conversation_id: resolution}`` — one call per
     subject type for the whole list, never one per conversation.

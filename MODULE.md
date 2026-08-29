@@ -66,6 +66,22 @@ refreshes on a timer — see *Why there is no realtime switch* below.
   tombstones never raise a badge. Both markers ride back with the conversation,
   which is what lets the live receipt be an ephemeral Signal rather than an
   event anyone is owed.
+- **Presence, and it is about the OTHER person** (`presence.py`, 0.7.0). Every
+  participant on the wire carries `online` and `last_seen_at`, derived from
+  **that user's own** sockets — never from the reader's. The header this
+  replaced said "На связи" whenever the reader's own socket was up, which is a
+  statement about the reader's network wearing somebody else's name. Online is
+  the **AND** of a live connection count and a lease (`online_until`): the
+  counter makes the last tab closing visible at once, the lease is what a
+  worker killed mid-socket cannot leave behind, and whichever fact is wrong the
+  answer degrades to *offline* — a false "online" is the defect, so that is the
+  direction it must fail in. `last_seen_at` moves on connect, disconnect and
+  every inbound frame, throttled to one write per `PRESENCE_WRITE_THROTTLE_S`
+  (a heartbeat is evidence of life, not a reason to write every twenty
+  seconds). Transitions — and only transitions — ride
+  `chat.presence.changed` on the conversation streams the user takes part in,
+  bounded by `PRESENCE_FANOUT_LIMIT`; the client's own transport health stays a
+  separate indicator that says *reconnecting* about itself.
 - **History & lists** — anchor-paginated (core `AnchorPagination`). Message
   history anchors on `seq`, newest-first, both directions, tombstones included;
   the conversation list anchors on `updated_at` and reports `unread_count`.
@@ -592,6 +608,15 @@ nobody had put in front of a socket that authenticates by cookie.
   how this module shipped a chat that refreshed every few seconds while its
   websockets were "done". If the socket cannot run, the deployment is broken and
   says so at boot.
+- **Don't render presence from your own socket.** "My websocket is open" and
+  "they are here" are different facts, and a client that draws the second from
+  the first tells every reader their counterparty is present for exactly as
+  long as their own network holds. Read `participants[].online` /
+  `last_seen_at`, or subscribe to `chat.presence.changed`. Your transport's
+  health belongs in a control that talks about your transport.
+- **Don't announce a presence renewal.** Only a flip is news. A heartbeat that
+  fanned out would put a signal on every one of a user's threads every few
+  seconds to say nothing changed.
 - **Don't replay by `seq`.** Anchor on `rev_seq`. Filtering on `seq` silently
   drops every edit and every tombstone that happened while a client was away —
   and it looks completely correct in a test where nobody goes offline.

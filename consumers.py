@@ -276,10 +276,113 @@ def _do_activity(conversation_id, user_id, payload: dict) -> dict | None:
     return None
 
 
+def _presence_connect(user_id) -> None:
+    from . import presence
+
+    presence.on_connect(user_id)
+
+
+def _presence_disconnect(user_id) -> None:
+    from . import presence
+
+    presence.on_disconnect(user_id)
+
+
+def _presence_touch(user_id) -> None:
+    from . import presence
+
+    presence.touch(user_id)
+
+
 # ── consumers ────────────────────────────────────────────────────────────
 
 
-class ChatConsumer(ResumableStreamConsumer):
+class PresenceMixin:
+    """Turns a live socket into a fact about its user.
+
+    Both chat sockets count — the thread and the inbox alike — because either
+    one open is a person reachable. Presence is per USER, so two tabs on two
+    threads are one online person and closing one of them changes nothing.
+
+    Three events feed it:
+
+    * **connect**, after the substrate accepted (``self.group`` is set only on
+      the accepted path, which is what distinguishes it from the four early
+      returns that close instead);
+    * **disconnect**, unconditionally — including the closes the substrate
+      makes on its own (heartbeat timeout, expired token), which is exactly
+      when a peer most needs to stop being told somebody is there;
+    * **every inbound frame**, as evidence of life. That includes the
+      heartbeat's ``pong``, which is the cheapest liveness signal there is,
+      so the lease renews without the client having to do anything. The
+      in-process guard below keeps a pong from costing a thread hop, and
+      :func:`presence.touch` keeps it from costing a write.
+
+    A presence failure never touches the socket: the thread is the product and
+    a header is not worth a disconnect.
+    """
+
+    #: Least seconds between two touches from THIS socket. A cheap local
+    #: guard in front of the database-level throttle in `presence.touch` —
+    #: the point is to skip the thread hop, not to be the authority.
+    presence_touch_interval_s = 15.0
+
+    async def connect(self):
+        self._presence_touched_at = 0.0
+        self._presence_counted = False
+        await super().connect()
+        if getattr(self, "group", None) is None:
+            return  # closed before accept — nobody connected
+        user_id = self._user_id()
+        if user_id is None:
+            return
+        self._presence_counted = True
+        try:
+            await database_sync_to_async(_presence_connect)(user_id)
+        except Exception:  # noqa: BLE001 — presence never closes a socket
+            logger.warning("chat: presence connect failed", exc_info=True)
+
+    async def disconnect(self, code):
+        await super().disconnect(code)
+        # Only decrement what was counted: an unaccepted socket never
+        # incremented, and decrementing it would strand the user offline
+        # while a real tab of theirs is open.
+        if not getattr(self, "_presence_counted", False):
+            return
+        self._presence_counted = False
+        user_id = self._user_id()
+        if user_id is None:
+            return
+        try:
+            await database_sync_to_async(_presence_disconnect)(user_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("chat: presence disconnect failed", exc_info=True)
+
+    async def receive_json(self, content, **kwargs):
+        await self._presence_evidence()
+        await super().receive_json(content, **kwargs)
+
+    async def _presence_evidence(self) -> None:
+        import time
+
+        if not getattr(self, "_presence_counted", False):
+            return
+        now = time.monotonic()
+        if now - getattr(self, "_presence_touched_at", 0.0) < (
+            self.presence_touch_interval_s
+        ):
+            return
+        self._presence_touched_at = now
+        user_id = self._user_id()
+        if user_id is None:
+            return
+        try:
+            await database_sync_to_async(_presence_touch)(user_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("chat: presence touch failed", exc_info=True)
+
+
+class ChatConsumer(PresenceMixin, ResumableStreamConsumer):
     """One socket ↔ one conversation, resumable by ``rev_seq``.
 
     The substrate owns authentication, the envelope, the heartbeat, backpressure
@@ -367,7 +470,7 @@ class ChatConsumer(ResumableStreamConsumer):
         await self._run(_do_activity, frame)
 
 
-class ChatInboxConsumer(EphemeralStreamConsumer):
+class ChatInboxConsumer(PresenceMixin, EphemeralStreamConsumer):
     """One socket ↔ one user's inbox. Read-only, ephemeral.
 
     Everything it carries — a new message in some thread, an unread count that
@@ -398,6 +501,7 @@ class ChatInboxConsumer(EphemeralStreamConsumer):
 __all__ = [
     "ACTIVITY",
     "ChatConsumer",
+    "PresenceMixin",
     "ChatInboxConsumer",
     "DELETE",
     "DELIVERED",

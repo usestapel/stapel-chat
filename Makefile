@@ -33,7 +33,15 @@ PYTHON ?= python3
 # that a block provider which is present and failing answers 503 rather than
 # delivering the message. An agent that reads none of them writes the bug.
 # Trim before raising it again.
-LLMS_BUDGET ?= 5600
+# Raised again in 0.7.0, from 5600, by 200: presence is a new fleet-visible
+# surface — a model, a signal, three config axes and two fields on every
+# participant on the wire. The lines that would have to go to fit 5600 are the
+# two an agent cannot write correct code without: that presence is a fact about
+# the OTHER party's own connections (never about the reader's socket, which is
+# the bug this release deletes), and that "online" is the AND of a connection
+# count and a lease so it degrades to offline rather than to a false yes.
+# Trim before raising it again.
+LLMS_BUDGET ?= 5800
 
 .PHONY: contract contract-check
 

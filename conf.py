@@ -42,6 +42,11 @@ CTO-facing config axes (capability-config.md §16):
 - ``MODERATION_TARGET_TYPE`` — the stapel-moderation target type registered
   for chat messages, when that module is installed and no host has declared
   the type itself. ``""`` registers nothing.
+- ``PRESENCE_TTL_S`` / ``PRESENCE_WRITE_THROTTLE_S`` /
+  ``PRESENCE_FANOUT_LIMIT`` — how long a live socket's evidence of life
+  stands, how rarely presence is written, and how many conversation streams
+  one transition tells. See ``presence.py``: presence is a fact about the
+  OTHER participant's connections, never about the reader's own socket.
 - ``SUBJECT_TYPES`` — the OPEN subject-type registry (``subjects.py``), EMPTY
   out of the box. Each policy names the ``card_function`` that renders that
   subject. A marketplace declares ``listing`` here; a generic chat declares
@@ -113,6 +118,23 @@ DEFAULTS = {
     # Seconds to wait for a subject card before rendering the conversation
     # without one. A header is never worth blocking a thread on.
     "SUBJECT_CARD_TIMEOUT_S": 2.0,
+    # How long a live socket's evidence of life stands without renewal (a
+    # "tuning" int axis). Presence is the AND of a connection count and this
+    # lease; the lease is what a worker killed mid-socket cannot leave behind.
+    # Keep it comfortably ABOVE PRESENCE_WRITE_THROTTLE_S or a busy socket
+    # would let its own lease lapse between throttled writes.
+    "PRESENCE_TTL_S": 90,
+    # Least seconds between two presence writes for one user. Every inbound
+    # frame is evidence of life and a heartbeat is inbound every few seconds;
+    # without this, presence would be a write-per-pong. 0 disables the
+    # throttle (every touch writes).
+    "PRESENCE_WRITE_THROTTLE_S": 30,
+    # Most conversation streams one presence transition fans out to, newest
+    # first. A user with ten thousand dormant threads must not turn one socket
+    # close into ten thousand signals; a thread past the bound repaints from
+    # the participant's presence on its next REST read. 0 turns the live
+    # announcement off and leaves presence a REST-only fact.
+    "PRESENCE_FANOUT_LIMIT": 200,
     # Whether a block stops opening a NEW direct thread and sending into one.
     # It never stops `create_direct` from RETURNING a thread that already
     # exists: that is a read of history, and this fleet's blocks do not

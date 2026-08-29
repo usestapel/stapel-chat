@@ -195,6 +195,13 @@
       "instead_of": [
         "stapel_core.comm.call"
       ]
+    },
+    "presence_for": {
+      "kind": "factory",
+      "intent": "Resolve, in ONE query, whether each participant of these conversations is connected right now and when they were last seen. Reach for it whenever you render a thread header or an inbox: presence is a fact about the OTHER person's own sockets, and a client that derives it from its own socket state is stating that its network is up while labelling it with somebody else's name — the defect this call exists to make impossible.",
+      "instead_of": [
+        "stapel_chat.models.UserPresence.objects.filter"
+      ]
     }
   },
   "axes": {

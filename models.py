@@ -250,6 +250,49 @@ class ConversationParticipant(models.Model):
         return f"{self.user_id} @ {self.conversation_id} ({self.role})"
 
 
+class UserPresence(models.Model):
+    """Whether a user is connected right now, and when they last were.
+
+    Keyed by the user, because that is the natural key — presence is one fact
+    per person, not a handle anybody cites across services. See
+    :mod:`stapel_chat.presence` for why online is the AND of a connection
+    count and a lease, and why a wrong answer degrades to "offline".
+
+    ``connections`` is the number of sockets this deployment believes are open
+    for the user (every chat socket, thread and inbox alike, counts). It is
+    incremented on connect and floored-decremented on disconnect, so the last
+    tab closing is visible to the peer at once.
+
+    ``online_until`` is the lease the live socket keeps renewing. It exists
+    for the case the counter cannot cover: a worker killed mid-socket never
+    runs its disconnect, and without an expiry that user is online forever.
+
+    ``last_seen_at`` is what the peer's header renders when the answer is
+    offline. It moves on connect, on disconnect and on activity, throttled to
+    one write per ``PRESENCE_WRITE_THROTTLE_S`` — a heartbeat is evidence of
+    life, not a reason to write to the database every twenty seconds.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        primary_key=True,
+        on_delete=models.CASCADE,
+        related_name="chat_presence",
+    )
+    connections = models.IntegerField(default=0)
+    online_until = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["online_until"], name="chat_presence_lease"),
+        ]
+
+    def __str__(self):
+        return f"presence {self.user_id} ({self.connections} conn)"
+
+
 class Message(models.Model):
     """A message in a conversation.
 

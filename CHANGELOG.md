@@ -4,6 +4,59 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-08-30
+
+### "На связи" was never about the other person
+
+The thread header said *"На связи"* — "connected" — whenever **the reader's
+own** websocket was up. In a classified marketplace it sat next to the
+seller's name and it read as *"the seller is online"*. It was never that. It
+was the browser reporting that it could still reach the server, and two people
+sitting in a dead thread were each told the other one was there.
+
+Presence is now a server-side fact about a **user**, derived from that user's
+own connections (`presence.py`, `UserPresence`):
+
+- `participants[].online` and `participants[].last_seen_at` on every
+  conversation body, so a header paints correctly on first load with no extra
+  round trip and nothing to derive;
+- `chat.presence.changed` on the conversation streams the user takes part in —
+  the stream a thread is already subscribed to, so presence costs no second
+  subscription;
+- `PRESENCE_TTL_S` / `PRESENCE_WRITE_THROTTLE_S` / `PRESENCE_FANOUT_LIMIT`.
+
+**Online is the AND of a connection count and a lease.** The counter makes the
+last tab closing visible to the peer at once; the lease is the part a worker
+killed mid-socket cannot leave behind, because a counter that never decrements
+would keep that user online forever. Whichever fact is wrong, the answer
+degrades to *offline* — a false "online" is the whole defect, so that is the
+direction this has to fail in. A disconnect whose connect was never recorded
+floors the counter at zero rather than driving it negative, which would
+otherwise strand a user offline while a real tab of theirs was open.
+
+**A heartbeat is evidence of life, not a write.** Every inbound frame touches
+presence — the substrate's `pong` included, which is the cheapest liveness
+signal there is — but `touch()` writes at most once per
+`PRESENCE_WRITE_THROTTLE_S`, in one conditional UPDATE that needs no read, and
+each socket holds a second in-process guard so a throttled touch does not even
+cost a thread hop. `stapel_chat.E021` refuses to boot a deployment whose
+throttle is not below its TTL: a healthy socket would let its own lease lapse
+between two permitted writes, and the peer would watch somebody sitting right
+there blink offline on a timer.
+
+Only flips are announced. A renewal that changes nothing tells nobody
+anything, and fanning one out would put a signal on every one of a user's
+threads every few seconds.
+
+**The client's own transport health is untouched.** `stapel-realtime`'s
+degradation states are the honest indicator for "my connection", and they stay
+exactly where they were. What is gone is one control answering both questions.
+
+No backfill: a user nobody has seen connect is offline with no last-seen, and
+the read path says exactly that. Stamping "now" on everyone at migration time
+would tell every peer that everybody had just been here — a worse lie than the
+one this release deletes.
+
 ## [0.6.3] — 2026-08-28
 
 ### A merge deleted the guest and their conversations went with it

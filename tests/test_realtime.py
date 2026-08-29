@@ -22,6 +22,35 @@ from stapel_chat.routing import websocket_urlpatterns
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(autouse=True)
+def _skip_presence_frames(monkeypatch):
+    """Presence is noise to every test in this file, so the harness drops it.
+
+    Since 0.7.0 a socket opening announces `chat.presence.changed` to every
+    conversation its user takes part in — which is the point of the feature,
+    and which means the frame a test asserts about is no longer reliably the
+    first one on the wire. Skipping it here is the same courtesy
+    `stapel_realtime.testing` already extends to the heartbeat: a frame the
+    test is not about should not have to be spelled out in the test.
+
+    `tests/test_presence.py` is where the frame IS the subject, and it reads
+    the signal directly rather than through this harness.
+    """
+    from stapel_realtime.testing import StreamClient
+
+    from stapel_chat.realtime import SIGNAL_PRESENCE
+
+    original = StreamClient.receive
+
+    async def receive(self, timeout: float = 2):
+        while True:
+            frame = await original(self, timeout=timeout)
+            if frame.type != SIGNAL_PRESENCE:
+                return frame
+
+    monkeypatch.setattr(StreamClient, "receive", receive)
+
+
 class _InjectUser:
     """Stand-in for JWTAuthMiddleware (G14): stamps a fixed user on the scope."""
 

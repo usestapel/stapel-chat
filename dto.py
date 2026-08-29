@@ -15,12 +15,25 @@ class ParticipantResponse:
         last_delivered_seq: seq of the newest message their client
             acknowledged receiving. Delivered is a weaker fact than read; a
             UI that draws one tick and two ticks needs both.
+        online: Whether THIS participant is connected right now — a
+            server-side fact derived from their own sockets
+            (:mod:`stapel_chat.presence`), never from the reader's. A client
+            that renders "online" from its own socket state is stating that
+            its own network is up and labelling it with somebody else's name;
+            that is the bug this field exists to delete.
+        last_seen_at: When they were last connected or active. What a header
+            renders when ``online`` is false ("last seen 5 minutes ago").
+            ``null`` means this deployment has never seen them connect —
+            distinct from "seen long ago", so a UI can say nothing rather
+            than invent a date.
     """
 
     user_id: str
     role: str
     last_read_seq: int
     last_delivered_seq: int = 0
+    online: bool = False
+    last_seen_at: Optional[datetime] = None
 
 
 @dataclass

@@ -1076,6 +1076,16 @@
           "last_delivered_seq": {
             "type": "integer",
             "description": "seq of the newest message their client"
+          },
+          "online": {
+            "type": "boolean",
+            "description": "Whether THIS participant is connected right now — a"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When they were last connected or active. What a header"
           }
         },
         "required": [

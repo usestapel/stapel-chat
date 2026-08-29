@@ -54,6 +54,11 @@ SIGNAL_DELIVERED = "chat.delivered"
 SIGNAL_ACTIVITY = "chat.activity"
 #: Something happened in a conversation this user takes part in (inbox).
 SIGNAL_INBOX = "chat.inbox"
+#: A participant connected or went away. See :mod:`stapel_chat.presence`.
+#: Ephemeral for the same reason the read receipt is: the durable answer rides
+#: back on every participant in the conversation body, so a subscriber that
+#: missed the flip learns it on its next read rather than being owed a replay.
+SIGNAL_PRESENCE = "chat.presence.changed"
 
 
 def conversation_stream(conversation_id) -> str:
@@ -185,6 +190,31 @@ def broadcast_activity(conversation_id, user_id, state: str, ttl_s: int) -> None
             "user_id": str(user_id),
             "state": state,
             "ttl_s": int(ttl_s),
+        },
+    )
+
+
+def broadcast_presence(
+    conversation_id, user_id, *, online: bool, last_seen_at=None
+) -> None:
+    """A participant connected or went away.
+
+    Sent on the CONVERSATION stream, not the inbox, because the thread header
+    is the surface that renders it and the thread is already subscribed there
+    — presence needs no second subscription and no second socket.
+
+    ``last_seen_at`` travels with the flip so an offline header can say *when*
+    without a round trip. It is ISO 8601 or null; null means this deployment
+    has never seen that user connect.
+    """
+    _signal(
+        conversation_stream(conversation_id),
+        SIGNAL_PRESENCE,
+        {
+            "conversation_id": str(conversation_id),
+            "user_id": str(user_id),
+            "online": bool(online),
+            "last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
         },
     )
 

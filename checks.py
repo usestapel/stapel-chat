@@ -152,6 +152,53 @@ def check_max_body_length(app_configs, **kwargs):
     return []
 
 
+@checks.register(checks.Tags.compatibility)
+def check_presence_windows(app_configs, **kwargs):
+    """The write throttle must fit inside the lease.
+
+    Presence renews its lease on the same write the throttle rations. Set the
+    throttle at or above the TTL and a perfectly healthy socket lets its own
+    lease lapse between two permitted writes — the peer then watches somebody
+    who is sitting right there blink offline on a timer. That is the same
+    class of defect as the "На связи" this surface replaced: a confident
+    statement about another person derived from the wrong fact. It is a
+    boot failure rather than a runtime surprise because the arithmetic is
+    knowable at check time.
+    """
+    from .conf import chat_settings
+
+    issues = []
+    ttl = chat_settings.PRESENCE_TTL_S
+    throttle = chat_settings.PRESENCE_WRITE_THROTTLE_S
+    fanout = chat_settings.PRESENCE_FANOUT_LIMIT
+    for name, value, floor in (
+        ("PRESENCE_TTL_S", ttl, 1),
+        ("PRESENCE_WRITE_THROTTLE_S", throttle, 0),
+        ("PRESENCE_FANOUT_LIMIT", fanout, 0),
+    ):
+        if not isinstance(value, int) or isinstance(value, bool) or value < floor:
+            issues.append(
+                checks.Error(
+                    f"STAPEL_CHAT['{name}'] must be an integer >= {floor}.",
+                    id="stapel_chat.E021",
+                )
+            )
+    if issues:
+        return issues
+    if throttle >= ttl:
+        return [
+            checks.Error(
+                f"STAPEL_CHAT['PRESENCE_WRITE_THROTTLE_S'] ({throttle}) is not "
+                f"below ['PRESENCE_TTL_S'] ({ttl}): a live socket would let "
+                "its own presence lease expire between two permitted writes, "
+                "and the other party would see it go offline while it is up.",
+                hint="Keep the throttle well under the TTL (30 under 90 by default).",
+                id="stapel_chat.E021",
+            )
+        ]
+    return []
+
+
 # ── Realtime: the socket is the product, so its absence is an error ──────
 #
 # 0.3.0's whole reason for existing. A deployment used to be able to install
