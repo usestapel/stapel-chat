@@ -195,7 +195,7 @@ def broadcast_activity(conversation_id, user_id, state: str, ttl_s: int) -> None
 
 
 def broadcast_presence(
-    conversation_id, user_id, *, online: bool, last_seen_at=None
+    conversation_id, user_id, *, online: bool, last_seen_at=None, online_until=None
 ) -> None:
     """A participant connected or went away.
 
@@ -206,6 +206,17 @@ def broadcast_presence(
     ``last_seen_at`` travels with the flip so an offline header can say *when*
     without a round trip. It is ISO 8601 or null; null means this deployment
     has never seen that user connect.
+
+    ``online_until`` is the lease deadline, and it is what makes an ``online``
+    frame **self-limiting**. A flip is announced from a disconnect; a lease
+    that simply runs out announces nothing, because nothing happened — no
+    socket closed, no row was written, there is no event to send. A client
+    told only ``online: true`` therefore believes it forever when the peer's
+    socket dies without a disconnect (a killed tab, a lost process), which is
+    exactly the case the counter cannot cover and the lease exists for. With
+    the deadline on the wire the client reaches the server's own answer on its
+    own clock, with no extra traffic, no poll, and no event that would have to
+    be invented for a non-happening.
     """
     _signal(
         conversation_stream(conversation_id),
@@ -215,6 +226,7 @@ def broadcast_presence(
             "user_id": str(user_id),
             "online": bool(online),
             "last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
+            "online_until": online_until.isoformat() if online_until else None,
         },
     )
 

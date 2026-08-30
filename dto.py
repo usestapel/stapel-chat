@@ -26,6 +26,15 @@ class ParticipantResponse:
             ``null`` means this deployment has never seen them connect —
             distinct from "seen long ago", so a UI can say nothing rather
             than invent a date.
+        online_until: When this ``online`` stops being believable — the lease
+            deadline (:mod:`stapel_chat.presence`). **A reader must stop
+            treating ``online`` as true at this instant**, exactly as the
+            server does. It is here because a lease running out is a SILENT
+            transition: a flip is announced from a disconnect, and a socket
+            that dies without one (a killed tab, a lost worker) produces no
+            event at all — the server heals on its own clock, and a client
+            that cannot see the deadline never learns. ``null`` when this
+            deployment has never seen them connect.
     """
 
     user_id: str
@@ -34,6 +43,7 @@ class ParticipantResponse:
     last_delivered_seq: int = 0
     online: bool = False
     last_seen_at: Optional[datetime] = None
+    online_until: Optional[datetime] = None
 
 
 @dataclass

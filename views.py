@@ -254,6 +254,9 @@ def conversation_to_dto(
                 last_seen_at=(presence.get(str(p.user_id)) or {}).get(
                     "last_seen_at"
                 ),
+                online_until=(presence.get(str(p.user_id)) or {}).get(
+                    "online_until"
+                ),
             )
             for p in conv.participants.all()
         ],

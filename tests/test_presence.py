@@ -30,9 +30,13 @@ def _users():
 
 
 def test_a_user_nobody_has_seen_is_offline_with_no_last_seen(db):
-    """Not an error, and not a fabricated timestamp: two honest nulls."""
+    """Not an error, and not a fabricated timestamp: three honest nulls."""
     a, _ = _users()
-    assert presence.for_user(a.id) == {"online": False, "last_seen_at": None}
+    assert presence.for_user(a.id) == {
+        "online": False,
+        "last_seen_at": None,
+        "online_until": None,
+    }
 
 
 def test_connect_makes_them_online_and_disconnect_makes_them_not(db):
@@ -349,3 +353,127 @@ def test_a_nonsense_window_is_refused_at_the_door(settings, override):
 
     settings.STAPEL_CHAT = override
     assert [i.id for i in check_presence_windows(None)] == ["stapel_chat.E021"]
+
+
+# ── the deadline on the wire (0.7.3) ─────────────────────────────────────
+#
+# The defect this section pins was found on a live stand, not in a test: a
+# reader's header said "online" ninety seconds after the peer was gone, while
+# the SERVER had already said offline. Nothing was broken in the server — the
+# lease had expired exactly as designed — and that is the whole problem. A
+# flip is announced from a disconnect; a lease running out announces nothing,
+# because nothing happens. No socket closes, no row is written, there is no
+# event to send. So a client told only `online: true` believes it forever.
+#
+# `online_until` is the fix, and it is a fix by DATA rather than by event: the
+# reader is given the same deadline the server evaluates and reaches the same
+# answer on its own clock.
+
+
+def test_the_body_ships_the_deadline_so_a_reader_can_expire_it_itself(
+    db, api_client
+):
+    a, b = _users()
+    conv = services.create_direct(owner=a, other_user_id=b.id)
+    presence.on_connect(b.id)
+
+    api_client.force_authenticate(user=a)
+    res = api_client.get(f"/chat/api/v1/conversations/{conv.id}")
+    peer = next(p for p in res.json()["participants"] if p["user_id"] == str(b.id))
+    assert peer["online"] is True
+    assert peer["online_until"] is not None
+
+
+def test_a_lease_that_expired_without_a_disconnect_reads_offline(db, api_client):
+    """THE case. connections > 0 — the disconnect never ran — and the lease is
+    in the past. The body must say offline, and must hand the reader the
+    deadline that makes that answer checkable."""
+    a, b = _users()
+    conv = services.create_direct(owner=a, other_user_id=b.id)
+    presence.on_connect(b.id)
+
+    past = timezone.now() - timedelta(seconds=1)
+    UserPresence.objects.filter(pk=b.pk).update(online_until=past)
+    row = UserPresence.objects.get(pk=b.pk)
+    assert row.connections > 0, "the socket was never cleanly closed"
+
+    api_client.force_authenticate(user=a)
+    res = api_client.get(f"/chat/api/v1/conversations/{conv.id}")
+    peer = next(p for p in res.json()["participants"] if p["user_id"] == str(b.id))
+    assert peer["online"] is False
+    assert peer["online_until"] is not None  # and it is in the past
+
+
+def test_the_reader_could_have_reached_that_answer_alone(db):
+    """The property the client half depends on: the deadline the server hands
+    out is the same one it evaluates. Given the body, a client with a clock
+    needs nothing else — no poll, and no event for a non-happening."""
+    a, b = _users()
+    presence.on_connect(b.id)
+    past = timezone.now() - timedelta(seconds=1)
+    UserPresence.objects.filter(pk=b.pk).update(online_until=past)
+
+    state = presence.for_user(b.id)
+    assert state["online"] is False
+    assert state["online_until"] == past
+    # The server's own verdict is exactly "is the deadline in the future".
+    assert (state["online_until"] > timezone.now()) is state["online"]
+
+
+def test_an_online_frame_carries_its_own_expiry(db, monkeypatch):
+    from stapel_chat import realtime
+
+    sent = []
+    monkeypatch.setattr(
+        realtime,
+        "_signal",
+        lambda stream, type_, payload: sent.append(payload)
+        if type_ == realtime.SIGNAL_PRESENCE
+        else None,
+    )
+    a, b = _users()
+    services.create_direct(owner=a, other_user_id=b.id)
+
+    presence.on_connect(b.id)
+    assert len(sent) == 1
+    assert sent[0]["online"] is True
+    # Self-limiting: the frame that says "online" also says how long that is
+    # good for, so a client that never hears another frame still expires it.
+    assert sent[0]["online_until"] is not None
+
+
+def test_a_going_away_frame_ends_the_lease_in_the_frame_itself(db, monkeypatch):
+    from stapel_chat import realtime
+
+    sent = []
+    monkeypatch.setattr(
+        realtime,
+        "_signal",
+        lambda stream, type_, payload: sent.append(payload)
+        if type_ == realtime.SIGNAL_PRESENCE
+        else None,
+    )
+    a, b = _users()
+    services.create_direct(owner=a, other_user_id=b.id)
+    presence.on_connect(b.id)
+    sent.clear()
+
+    presence.on_disconnect(b.id)
+    assert sent[0]["online"] is False
+    assert sent[0]["online_until"] is not None
+
+
+def test_the_deadline_moves_forward_on_a_renewal(db, settings):
+    """A touch renews the lease, so a client's timer is pushed out by the next
+    body it reads. Without this the deadline would be a countdown to a wrong
+    answer on a socket that is very much alive."""
+    settings.STAPEL_CHAT = {"PRESENCE_WRITE_THROTTLE_S": 30, "PRESENCE_TTL_S": 90}
+    a, _ = _users()
+    presence.on_connect(a.id)
+    first = presence.for_user(a.id)["online_until"]
+
+    stale = timezone.now() - timedelta(seconds=31)
+    UserPresence.objects.filter(pk=a.pk).update(last_seen_at=stale)
+    assert presence.touch(a.id) is True
+
+    assert presence.for_user(a.id)["online_until"] > first

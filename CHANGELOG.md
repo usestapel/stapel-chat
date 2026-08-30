@@ -4,6 +4,40 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] — 2026-08-30
+
+### An "online" nobody ever takes back
+
+Found on a live stand, not in a test: a reader's header said the other person
+was online ninety seconds after they were gone — while the server had already
+said offline. Nothing in the server was broken. The lease had expired exactly
+as 0.7.0 designed it, and that is the whole problem.
+
+`chat.presence.changed` is announced from a **disconnect**. A lease running
+out announces nothing, because nothing happens: no socket closes, no row is
+written, there is no event to send. And the lease exists precisely for the
+case where no disconnect ever runs — a killed tab, a lost worker, the socket
+that dies without telling anybody. So exactly when the counter cannot help,
+the server heals silently on its own clock and every subscribed client keeps
+rendering the last thing it was told, forever.
+
+`online_until` now rides on `ParticipantResponse` and in the
+`chat.presence.changed` payload. It is the deadline the server itself
+evaluates, handed to the reader so the reader reaches the same answer alone —
+**a fix by data rather than by event**. An `online` frame is now
+self-limiting: it says how long it is good for, so a client that never hears
+another frame still expires it. No poll, no extra traffic, and no invented
+event for a non-happening.
+
+Additive: the field is absent from the schema's `required` list, like `online`
+and `last_seen_at` before it, so a client on the 0.7.0 contract reads a 0.7.3
+body unchanged and simply keeps its old behaviour.
+
+The pinned case is the one the stand produced — `connections > 0` because the
+disconnect never ran, `online_until` in the past — and the assertion is both
+halves: the body says offline, and it carries the deadline that makes that
+answer checkable by the client on its own.
+
 ## [0.7.2] — 2026-08-30
 
 ### Fixed — the poison-pill guard needed a floor on stapel-moderation

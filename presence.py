@@ -44,7 +44,7 @@ from datetime import timedelta
 logger = logging.getLogger(__name__)
 
 #: What a snapshot answers for a user nobody has ever seen connect.
-UNKNOWN = {"online": False, "last_seen_at": None}
+UNKNOWN = {"online": False, "last_seen_at": None, "online_until": None}
 
 
 def _ttl() -> int:
@@ -94,6 +94,12 @@ def snapshot(user_ids) -> dict:
         out[str(row.user_id)] = {
             "online": is_online(row, now),
             "last_seen_at": row.last_seen_at,
+            # The lease deadline, shipped so a reader can reach the same
+            # answer this function just computed WITHOUT asking again. See
+            # the module docstring: a lease running out is a silent
+            # transition, and a client that cannot see the deadline has no
+            # way to notice one.
+            "online_until": row.online_until,
         }
     return out
 
@@ -118,6 +124,7 @@ def on_connect(user_id) -> bool:
     from .models import UserPresence
 
     now = timezone.now()
+    deadline = now + timedelta(seconds=_ttl())
     row, created = UserPresence.objects.get_or_create(
         user_id=user_id,
         defaults={"connections": 0, "last_seen_at": now, "online_until": now},
@@ -125,11 +132,11 @@ def on_connect(user_id) -> bool:
     was_online = False if created else is_online(row, now)
     UserPresence.objects.filter(pk=row.pk).update(
         connections=F("connections") + 1,
-        online_until=now + timedelta(seconds=_ttl()),
+        online_until=deadline,
         last_seen_at=now,
     )
     if not was_online:
-        announce(user_id, online=True, last_seen_at=now)
+        announce(user_id, online=True, last_seen_at=now, online_until=deadline)
         return True
     return False
 
@@ -160,7 +167,7 @@ def on_disconnect(user_id) -> bool:
     if row is None or (row.connections or 0) > 0:
         return False
     UserPresence.objects.filter(pk=row.pk).update(online_until=now)
-    announce(user_id, online=False, last_seen_at=now)
+    announce(user_id, online=False, last_seen_at=now, online_until=now)
     return True
 
 
@@ -190,7 +197,7 @@ def touch(user_id) -> bool:
 # ── fan-out ──────────────────────────────────────────────────────────────
 
 
-def announce(user_id, *, online: bool, last_seen_at=None) -> int:
+def announce(user_id, *, online: bool, last_seen_at=None, online_until=None) -> int:
     """Tell every thread this user takes part in that their presence flipped.
 
     Bounded by ``PRESENCE_FANOUT_LIMIT``, newest threads first: a transition
@@ -214,7 +221,11 @@ def announce(user_id, *, online: bool, last_seen_at=None) -> int:
     )
     for conversation_id in conversation_ids:
         broadcast_presence(
-            conversation_id, user_id, online=online, last_seen_at=last_seen_at
+            conversation_id,
+            user_id,
+            online=online,
+            last_seen_at=last_seen_at,
+            online_until=online_until,
         )
     return len(conversation_ids)
 

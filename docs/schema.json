@@ -1086,6 +1086,12 @@
             "format": "date-time",
             "nullable": true,
             "description": "When they were last connected or active. What a header"
+          },
+          "online_until": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When this ``online`` stops being believable — the lease"
           }
         },
         "required": [
