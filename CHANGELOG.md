@@ -4,6 +4,19 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] — 2026-08-30
+
+### Fixed — the poison-pill guard needed a floor on stapel-moderation
+
+0.7.1's fix is correct and unchanged; its new test is not self-contained. This
+suite installs stapel-moderation for real (a fake would assert nothing but this
+suite's own idea of the other side), and that module subscribes to
+`user.deleted` too. On <= 0.3.0 its handler raised `ValidationError` on the
+malformed id, so the test failed on the sibling's bug rather than passing on
+ours. The test-extra floor is now `stapel-moderation>=0.3.1`, which carries the
+same fix. 0.7.1 was never published.
+
+
 ## [0.7.1] — 2026-08-30
 
 ### Fixed — a malformed id in an action payload was a poison pill

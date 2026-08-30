@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-chat"
-version = "0.7.1"
+version = "0.7.2"
 description = "Conversations, messaging and support chat for the Stapel framework"
 readme = "README.md"
 license = { text = "MIT" }
@@ -72,7 +72,9 @@ test = [
     # The moderation queue the seam tests meet for real. Optional to the
     # package (moderation.py), required to prove interop — a fake would
     # assert nothing but this suite's own idea of the other side.
-    "stapel-moderation>=0.3.0,<1.0",
+    # 0.3.1 is the floor: below it that module's own user.deleted handler
+    # raises on a malformed id, so the poison-pill test here fails on its bug.
+    "stapel-moderation>=0.3.1,<1.0",
     # The CDN whose media vocabulary chat's attachment types must equal
     # (0.4.0). Its two agreement tests were skipped on every CI run before
     # this extra existed, so the agreement they claim to enforce was enforced
