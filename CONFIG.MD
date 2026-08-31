@@ -23,8 +23,8 @@ deployment that shipped "updates every few seconds" never chose it either.
 | CHAT_KINDS | env | axis: enabled subset of {direct, group, support}. Dropping `support` removes the operator queue; dropping `group` leaves only 1:1. | no | [direct, group, support] |
 | ATTACHMENTS | env | axis: whether messages may carry attachments (opaque CDN key + render metadata; no files stored). When off, an attachment-bearing message is rejected. | no | true |
 | MAX_BODY_LENGTH | env | axis: hard cap on a text message body (characters). | no | 4000 |
-| ATTACHMENT_TYPES | settings | OPEN registry, merged over the builtins {image, gif, video, audio, file} — the SAME names as stapel-cdn's media kinds; `None` removes one. Where a host adds stickers (in both). | no | {} |
-| ACTIVITY_STATES | settings | OPEN registry, merged over the builtins {idle, typing, recording_audio, sending_video, uploading_file}; `None` removes one. | no | {} |
+| ATTACHMENT_TYPES | env | OPEN registry, merged over the builtins {image, gif, video, audio, file} — the SAME names as stapel-cdn's media kinds; `None` removes one. Where a host adds stickers (in both). | no | {} |
+| ACTIVITY_STATES | env | OPEN registry, merged over the builtins {idle, typing, recording_audio, sending_video, uploading_file}; `None` removes one. | no | {} |
 | ATTACHMENT_METADATA | env | axis: `cdn` asks `cdn.describe_many` by comm (one call per message, paged at 50 refs) and merges its answer over the client's; `client` trusts the sender and makes no call. | no | cdn |
 | MAX_ATTACHMENTS | env | axis: attachments per message. | no | 10 |
 | MAX_PREVIEW_B64_BYTES | env | axis: ceiling on an inline `data:` preview (micro-thumbnail / poster / waveform) — untrusted bytes rendered on other people's screens. Matches stapel-cdn's MICRO_PREVIEW_MAX_BYTES and is measured the same way. | no | 4096 |
