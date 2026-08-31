@@ -4,6 +4,10 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.7.4
+
+- CONFIG.MD: `ATTACHMENT_TYPES`/`ACTIVITY_STATES` declare source `env` (the two-token contract has no `settings`); the 0.7.3 wheel shipped the invalid rows and broke `assemble_scaffold` for every selection including chat.
+
 ## [0.7.3] — 2026-08-30
 
 ### An "online" nobody ever takes back
