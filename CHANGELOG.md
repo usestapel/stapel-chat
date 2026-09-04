@@ -4,6 +4,47 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-09-04
+
+### Presence is told to accounts, not to sessions
+
+Found on a live stand: an anonymous visitor taps "message the seller", the
+storefront mints a guest, and the room that opens carries the seller's
+`last_seen_at` and `online_until` — "last seen 38 minutes ago" handed to
+somebody who has not named themselves, one tap at a time and once per
+throwaway browser profile.
+
+Nothing was bypassed. A guest is a stored user; it passes `IsAuthenticated`
+like everybody else, which is the point of guests — the storefront's whole
+guest wall is "an account is minted at the moment of the action". The wrong
+part was that this module asked `is_authenticated` when the question it
+needed answered was **is there a person with an account behind this
+session**. Those are two different questions and only one of them is about
+consent.
+
+Both paths now ask the second one (`presence.is_account`):
+
+- **REST** — `services.presence_for(conversations, viewer=…)` answers a guest
+  with an empty map, so every participant ships the offline default the DTO
+  already documents. Every HTTP path passes its `request.user`; a server-side
+  caller that passes no viewer reads unfiltered, as before.
+- **The live flip** — `presence.announce` skips a conversation a guest takes
+  part in. The frame is addressed to a stream, not to a person, so there is
+  no per-recipient filter at delivery: the choice is between telling the
+  guest and not sending it.
+
+The account on the other side of the thread loses nothing over REST — it is
+the guest's session that is answered short, not the seller's. A deployment
+whose user model has no guests is unaffected: the field this reads does not
+exist there and the test is exactly `is_authenticated` again.
+
+`PRESENCE_REQUIRES_ACCOUNT=False` restores the old answer as something a
+deployment states rather than inherits.
+
+Minor, not patch: a guest that used to read a counterpart's presence now
+reads the offline default. That is the fix, and a client rendering the
+default is a client already rendering "last seen — unknown".
+
 ## 0.7.4
 
 - CONFIG.MD: `ATTACHMENT_TYPES`/`ACTIVITY_STATES` declare source `env` (the two-token contract has no `settings`); the 0.7.3 wheel shipped the invalid rows and broke `assemble_scaffold` for every selection including chat.

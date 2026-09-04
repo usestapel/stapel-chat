@@ -978,14 +978,23 @@ def conversation_participants(conversation_ids) -> dict:
     return out
 
 
-def presence_for(conversations) -> dict:
+def presence_for(conversations, viewer=None) -> dict:
     """``[Conversation, …] -> {user_id: {"online", "last_seen_at"}}``.
 
     One query for every participant of a whole page, the same shape of read as
     :func:`subject_cards_for` and for the same reason: a header that has to
     ask per conversation is a header that will be asked fifty times.
+
+    ``viewer`` is who the answer is FOR. A guest — signed in far enough to
+    pass ``IsAuthenticated``, with nobody having registered — is answered with
+    an empty map, and the DTO then ships the offline default that every caller
+    already renders (:mod:`stapel_chat.presence`). Omitting the argument keeps
+    the unfiltered read for server-side callers; every HTTP path passes one.
     """
-    from .presence import snapshot
+    from .presence import readable_by, snapshot
+
+    if viewer is not None and not readable_by(viewer):
+        return {}
 
     user_ids = {
         str(p.user_id) for c in conversations for p in c.participants.all()

@@ -135,6 +135,16 @@ DEFAULTS = {
     # the participant's presence on its next REST read. 0 turns the live
     # announcement off and leaves presence a REST-only fact.
     "PRESENCE_FANOUT_LIMIT": 200,
+    # Whether presence is disclosed only to participants who have an ACCOUNT.
+    # A storefront mints a guest the moment somebody taps "message the
+    # seller": a stored user that passes IsAuthenticated while nobody has
+    # registered. True (the default) answers such a session with the offline
+    # default and sends it no flip — "last seen 38 minutes ago" is a fact
+    # about the counterpart's day, and a tap is not the moment to hand it to
+    # the open internet. The account on the other side of the thread keeps
+    # both. False is the pre-0.8.0 answer, stated rather than inherited. On a
+    # user model with no guests this changes nothing.
+    "PRESENCE_REQUIRES_ACCOUNT": True,
     # Whether a block stops opening a NEW direct thread and sending into one.
     # It never stops `create_direct` from RETURNING a thread that already
     # exists: that is a read of history, and this fleet's blocks do not

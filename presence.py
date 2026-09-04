@@ -35,6 +35,19 @@ rides the conversation streams the user takes part in — the stream a thread
 header is already subscribed to, so the header updates without a second
 subscription — and only when the boolean actually flips. A renewal that
 changes nothing tells nobody anything.
+
+**Presence is told to accounts, not to sessions.** A storefront mints a
+*guest* the moment somebody taps "message the seller" — a real row that
+passes ``IsAuthenticated`` while nobody has signed up for anything. Presence
+is a fact about a person's day ("last seen 38 minutes ago"), and handing it
+to a session that has not named itself hands it to the open internet, one
+tap at a time. So both paths ask :func:`is_account` and not
+``is_authenticated``: the REST read ships the offline default to a guest
+(:func:`stapel_chat.services.presence_for`), and :func:`announce` skips a
+conversation a guest can read. The account on the other side keeps both.
+``PRESENCE_REQUIRES_ACCOUNT=False`` restores the old answer as something a
+deployment states rather than inherits. A deployment whose user model has no
+guests is unaffected — the field the test reads does not exist there.
 """
 from __future__ import annotations
 
@@ -57,6 +70,63 @@ def _throttle() -> int:
     from .conf import chat_settings
 
     return max(0, int(chat_settings.PRESENCE_WRITE_THROTTLE_S))
+
+
+def is_account(user) -> bool:
+    """Whether this caller is a person with an account, not a guest session.
+
+    Two different questions wear the same word. Django's ``AnonymousUser``
+    answers ``is_authenticated=False`` — the unsigned browser. A **guest** is
+    a stored user minted from an action handler before anybody registered
+    (``stapel_core``'s ``User.create_anonymous_user``): it answers
+    ``is_authenticated=True`` and carries ``is_anonymous=True``. Every
+    ``IsAuthenticated`` view in the fleet lets it through, which is the point
+    of guests; what it must not do is make somebody else's presence readable.
+
+    On a user model without guests (plain Django), ``is_anonymous`` is the
+    inherited property — ``False`` for a signed-in user — so this is exactly
+    ``is_authenticated`` there and nothing changes.
+    """
+    if user is None:
+        return False
+    if not getattr(user, "is_authenticated", False):
+        return False
+    return not bool(getattr(user, "is_anonymous", False))
+
+
+def readable_by(user) -> bool:
+    """Whether presence may be disclosed to this caller at all."""
+    from .conf import chat_settings
+
+    if not chat_settings.PRESENCE_REQUIRES_ACCOUNT:
+        return True
+    return is_account(user)
+
+
+def _guest_ids(user_ids) -> set:
+    """Which of these user ids are guests — empty where guests don't exist.
+
+    Asked of the user model, once per fan-out, and only about the ids already
+    in hand. ``FieldDoesNotExist`` is the answer for a deployment whose user
+    model has no such notion: no guests, nothing to withhold from.
+    """
+    from django.contrib.auth import get_user_model
+    from django.core.exceptions import FieldDoesNotExist
+
+    wanted = [uid for uid in user_ids if uid]
+    if not wanted:
+        return set()
+    User = get_user_model()
+    try:
+        User._meta.get_field("is_anonymous")
+    except FieldDoesNotExist:
+        return set()
+    return {
+        str(uid)
+        for uid in User.objects.filter(
+            id__in=wanted, is_anonymous=True
+        ).values_list("id", flat=True)
+    }
 
 
 def is_online(row, now=None) -> bool:
@@ -206,6 +276,12 @@ def announce(user_id, *, online: bool, last_seen_at=None, online_until=None) -> 
     ten thousand signals. A thread past the bound repaints from the
     participant's presence on its next REST read, which every open costs
     anyway.
+
+    A thread a **guest** takes part in is skipped entirely (see the module
+    docstring). The frame is addressed to a stream, not to a person, so there
+    is no per-recipient filter to apply at delivery: the choice is between
+    telling the guest and not sending it. The account on the other side keeps
+    presence over REST, where the reader is known.
     """
     from .conf import chat_settings
     from .models import ConversationParticipant
@@ -219,6 +295,22 @@ def announce(user_id, *, online: bool, last_seen_at=None, online_until=None) -> 
         .order_by("-conversation__updated_at")
         .values_list("conversation_id", flat=True)[:limit]
     )
+    if conversation_ids and chat_settings.PRESENCE_REQUIRES_ACCOUNT:
+        others = list(
+            ConversationParticipant.objects.filter(
+                conversation_id__in=conversation_ids
+            )
+            .exclude(user_id=user_id)
+            .values_list("conversation_id", "user_id")
+        )
+        guests = _guest_ids({uid for _, uid in others})
+        if guests:
+            listening = {
+                str(cid) for cid, uid in others if str(uid) in guests
+            }
+            conversation_ids = [
+                cid for cid in conversation_ids if str(cid) not in listening
+            ]
     for conversation_id in conversation_ids:
         broadcast_presence(
             conversation_id,
@@ -234,9 +326,11 @@ __all__ = [
     "UNKNOWN",
     "announce",
     "for_user",
+    "is_account",
     "is_online",
     "on_connect",
     "on_disconnect",
+    "readable_by",
     "snapshot",
     "touch",
 ]

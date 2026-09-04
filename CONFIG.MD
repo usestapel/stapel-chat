@@ -30,6 +30,10 @@ deployment that shipped "updates every few seconds" never chose it either.
 | MAX_PREVIEW_B64_BYTES | env | axis: ceiling on an inline `data:` preview (micro-thumbnail / poster / waveform) — untrusted bytes rendered on other people's screens. Matches stapel-cdn's MICRO_PREVIEW_MAX_BYTES and is measured the same way. | no | 4096 |
 | EDIT_WINDOW_S | env | axis: seconds an author may still edit their own message; 0 = no deadline. | no | 0 |
 | SCOPE_PROVIDER | env | dotted path to a ScopeProvider (resolve/filter the opaque scope_key). | no | stapel_chat.scope.DefaultScopeProvider |
+| PRESENCE_TTL_S | env | tuning: seconds a live socket's evidence of life stands without renewal. Keep it above PRESENCE_WRITE_THROTTLE_S. | no | 90 |
+| PRESENCE_WRITE_THROTTLE_S | env | tuning: least seconds between two presence writes for one user; 0 writes on every touch. | no | 30 |
+| PRESENCE_FANOUT_LIMIT | env | tuning: most conversation streams one presence transition fans out to, newest first; 0 leaves presence a REST-only fact. | no | 200 |
+| PRESENCE_REQUIRES_ACCOUNT | env | axis: whether presence is disclosed only to participants with an ACCOUNT. A guest session (IsAuthenticated, nobody registered) is answered with the offline default and sent no flip. False is the pre-0.8.0 answer. | no | true |
 
 ## Host settings this module requires (not its own namespace)
 

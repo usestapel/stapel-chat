@@ -330,7 +330,7 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
         cards = services.subject_cards_for(page)
         # Same batching rule for presence: one query for every participant on
         # the page, never one per row.
-        presence = services.presence_for(page)
+        presence = services.presence_for(page, viewer=request.user)
         response_cls = self.get_response_serializer_class()
         items = [
             response_cls(
@@ -422,7 +422,7 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
                     conv,
                     _my_participant(conv, request.user),
                     cards.get(str(conv.id)),
-                    services.presence_for([conv]),
+                    services.presence_for([conv], viewer=request.user),
                 )
             ),
             status=status.HTTP_201_CREATED,
@@ -452,7 +452,7 @@ class ConversationDetailView(SerializerSeamMixin, APIView):
                     conv,
                     participant,
                     cards.get(str(conv.id)),
-                    services.presence_for([conv]),
+                    services.presence_for([conv], viewer=request.user),
                 )
             )
         )
@@ -710,7 +710,7 @@ class SupportQueueView(SerializerSeamMixin, APIView):
         cards = services.subject_cards_for(page)
         # Same batching rule for presence: one query for every participant on
         # the page, never one per row.
-        presence = services.presence_for(page)
+        presence = services.presence_for(page, viewer=request.user)
         response_cls = self.get_response_serializer_class()
         items = [
             response_cls(
@@ -759,7 +759,7 @@ class SupportAssignView(SerializerSeamMixin, APIView):
                 conversation_to_dto(
                     conv,
                     _my_participant(conv, request.user),
-                    presence=services.presence_for([conv]),
+                    presence=services.presence_for([conv], viewer=request.user),
                 )
             )
         )
@@ -799,7 +799,7 @@ class _SupportTransitionView(SerializerSeamMixin, APIView):
                 conversation_to_dto(
                     conv,
                     _my_participant(conv, request.user),
-                    presence=services.presence_for([conv]),
+                    presence=services.presence_for([conv], viewer=request.user),
                 )
             )
         )

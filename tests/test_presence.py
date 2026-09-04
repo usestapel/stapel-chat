@@ -477,3 +477,134 @@ def test_the_deadline_moves_forward_on_a_renewal(db, settings):
     assert presence.touch(a.id) is True
 
     assert presence.for_user(a.id)["online_until"] > first
+
+
+# ── who presence is FOR ──────────────────────────────────────────────────
+#
+# The stand defect (2026-09-04): an anonymous visitor taps "message the
+# seller", the storefront mints a guest, and the room comes back carrying the
+# seller's `last_seen_at`. A guest passes `IsAuthenticated` — that is what a
+# guest is for — so the shape has to be decided on "is there an account
+# behind this session", not on "did anything authenticate".
+
+
+def _guest():
+    from django.contrib.auth import get_user_model
+
+    return get_user_model().create_anonymous_user()
+
+
+def test_a_guest_is_authenticated_and_still_not_an_account(db):
+    a, _ = _users()
+    guest = _guest()
+
+    assert guest.is_authenticated is True
+    assert presence.is_account(guest) is False
+    assert presence.is_account(a) is True
+
+
+def test_a_guest_reads_the_room_without_the_counterpart_s_presence(
+    db, api_client
+):
+    """The wire shape of the defect: same room, two readers, two answers."""
+    seller, _ = _users()
+    guest = _guest()
+    conv = services.create_direct(owner=guest, other_user_id=seller.id)
+    presence.on_connect(seller.id)
+    presence.on_disconnect(seller.id)
+
+    api_client.force_authenticate(user=guest)
+    res = api_client.get(f"/chat/api/v1/conversations/{conv.id}")
+    assert res.status_code == 200
+    peer = next(
+        p for p in res.json()["participants"] if p["user_id"] == str(seller.id)
+    )
+    assert peer["online"] is False
+    assert peer["last_seen_at"] is None
+    assert peer["online_until"] is None
+
+    # The account on the other side of the same thread keeps the fact.
+    api_client.force_authenticate(user=seller)
+    res = api_client.get(f"/chat/api/v1/conversations/{conv.id}")
+    peer = next(
+        p for p in res.json()["participants"] if p["user_id"] == str(seller.id)
+    )
+    assert peer["last_seen_at"] is not None
+
+
+def test_the_room_a_guest_opens_carries_no_presence_on_creation(
+    db, api_client
+):
+    """201 is the body the storefront actually renders — the defect was read
+    off the create response, not off a later GET."""
+    seller, _ = _users()
+    guest = _guest()
+    presence.on_connect(seller.id)
+    presence.on_disconnect(seller.id)
+
+    api_client.force_authenticate(user=guest)
+    res = api_client.post(
+        "/chat/api/v1/conversations",
+        {"kind": "direct", "participant_ids": [str(seller.id)]},
+        format="json",
+    )
+    assert res.status_code == 201
+    peer = next(
+        p for p in res.json()["participants"] if p["user_id"] == str(seller.id)
+    )
+    assert peer["last_seen_at"] is None
+    assert peer["online_until"] is None
+
+
+def test_a_guest_s_inbox_page_is_answered_the_same_way(db, api_client):
+    seller, _ = _users()
+    guest = _guest()
+    services.create_direct(owner=guest, other_user_id=seller.id)
+    presence.on_connect(seller.id)
+
+    api_client.force_authenticate(user=guest)
+    res = api_client.get("/chat/api/v1/conversations")
+    assert res.status_code == 200
+    for row in res.json()["items"]:
+        for participant in row["participants"]:
+            assert participant["online"] is False
+            assert participant["last_seen_at"] is None
+
+
+def test_no_flip_is_announced_into_a_room_a_guest_can_read(db, monkeypatch):
+    """REST alone would not close it: the header also has a socket, and the
+    flip travels on the stream the guest is subscribed to."""
+    from stapel_chat import realtime
+
+    sent = []
+    monkeypatch.setattr(
+        realtime,
+        "_signal",
+        lambda stream, type_, payload: sent.append((stream, payload))
+        if type_ == realtime.SIGNAL_PRESENCE
+        else None,
+    )
+    seller, member = _users()
+    guest = _guest()
+    services.create_direct(owner=guest, other_user_id=seller.id)
+    with_account = services.create_direct(owner=member, other_user_id=seller.id)
+
+    presence.on_connect(seller.id)
+
+    streams = {stream for stream, _ in sent}
+    assert streams == {realtime.conversation_stream(with_account.id)}
+
+
+def test_a_deployment_may_state_the_old_answer(db, api_client, settings):
+    settings.STAPEL_CHAT = {"PRESENCE_REQUIRES_ACCOUNT": False}
+    seller, _ = _users()
+    guest = _guest()
+    conv = services.create_direct(owner=guest, other_user_id=seller.id)
+    presence.on_connect(seller.id)
+
+    api_client.force_authenticate(user=guest)
+    res = api_client.get(f"/chat/api/v1/conversations/{conv.id}")
+    peer = next(
+        p for p in res.json()["participants"] if p["user_id"] == str(seller.id)
+    )
+    assert peer["online"] is True
