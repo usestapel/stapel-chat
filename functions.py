@@ -25,6 +25,11 @@ Functions (see schemas/functions/):
 - ``chat.conversation_participants`` — who is a party to these conversations,
   batched, answering for every id asked. The read a consumer had to avoid by
   keeping its own copy of the parties on its own row.
+- ``chat.post_system_message`` — one system line into a conversation, written
+  by another service. The narrow WRITE in a family of reads, and narrow on
+  purpose: it can post only with ``sender=None`` and ``kind=system``. A
+  general ``chat.post_message`` on the bus would be a way to put words in a
+  user's mouth, in a product where the thread is the record of a deal.
 
 Consumes (see schemas/consumes/):
 - ``user.deleted`` — erase the deleted user's messages and participations
@@ -40,6 +45,55 @@ _SCHEMAS_DIR = Path(__file__).resolve().parent / "schemas" / "functions"
 
 def _schema(name: str) -> dict:
     return json.loads((_SCHEMAS_DIR / f"{name}.json").read_text(encoding="utf-8"))
+
+
+@function(
+    "chat.post_system_message", schema=_schema("chat.post_system_message")
+)
+def post_system_message(payload):
+    """Write one system line into a conversation, on behalf of no user.
+
+    Input: ``{"conversation_id": str, "body": str, "client_msg_id": str?}``.
+    Output: ``{"message_id", "seq", "conversation_id"}``.
+
+    The one WRITE on this surface, and the reason it is this shape rather than
+    a general "post a message": it hard-codes ``sender=None`` and
+    ``kind=system``, so nothing reachable from the bus can say something *as
+    a person*. The audience is a sibling service recording that something
+    happened in a thread it does not own — a call ended, a booking was
+    confirmed, an order shipped — where the alternative today is that service
+    importing ``stapel_chat.services``, which is the import this shelf does
+    not permit.
+
+    ``body`` is a marker key the reader renders, following the convention this
+    module's own lines already use (``chat.support.assigned``,
+    ``video.call.ended:188``). Not a rendered sentence: the reader's locale is
+    not the writer's, and a formatted duration freezes one presentation into
+    a row that outlives it.
+
+    ``client_msg_id`` is the existing per-conversation idempotency key. A
+    caller on an at-least-once transport passes one derived from the fact it
+    is recording, and a redelivery writes one line rather than two.
+
+    An unknown conversation raises ``services.ConversationNotFound`` (a
+    ``LookupError``), so a caller can tell "that thread is gone, stop
+    retrying" from "I could not answer, retry" — the same contract the
+    ``*.moderation_content`` family established. Answering a quiet success
+    would make a service that lost its thread reference look exactly like one
+    whose writes are landing.
+    """
+    from . import services
+
+    message = services.post_system_message(
+        payload["conversation_id"],
+        payload["body"],
+        payload.get("client_msg_id") or "",
+    )
+    return {
+        "message_id": str(message.pk),
+        "seq": message.seq,
+        "conversation_id": str(message.conversation_id),
+    }
 
 
 @function("chat.moderation_content", schema=_schema("chat.moderation_content"))

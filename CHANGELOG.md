@@ -4,6 +4,59 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-09-05
+
+### Added — `chat.post_system_message`: a sibling service can record what happened
+
+A thread is where two people agreed something, and things that happen outside
+chat belong in it — a call ended, a booking was confirmed, an order shipped.
+Until now a sibling module had exactly two ways to write that line: import
+`stapel_chat.services`, which this shelf does not permit, or go through the
+REST endpoint as a user, which is not what it is. So most of them wrote
+nothing, and the thread quietly stopped being the record it is supposed to be.
+
+The Function is **narrow, and the narrowness is the whole design**. Its
+payload is `{conversation_id, body, client_msg_id?}` and nothing else:
+`sender=None` and `kind=system` are hard-coded in
+`services.post_system_message`, `additionalProperties: false` is on the
+schema, and there is no argument anywhere in the path that names an author. A
+general `chat.post_message` on the bus would be a way to put words in a user's
+mouth — in a product where a conversation is evidence about a deal — and the
+distance between "we need to write a line" and "anything on the bus can
+impersonate anybody" is one convenience parameter.
+
+Three smaller decisions, each of which had a wrong-looking obvious answer:
+
+- **The body is a marker key, not a sentence.** `video.call.ended:188`, the
+  convention this module's own `chat.support.assigned` already uses. A
+  rendered string freezes one language and one number format into a row that
+  outlives both, and the reader's locale is not the writer's. (Known gap: a
+  `Message` has no structured-parameter field, so an argument rides after a
+  colon. The marker keeps its meaning if such a field arrives.)
+- **An unknown conversation raises `ConversationNotFound`** — a `LookupError`,
+  matching `MessageNotFound` and for the same reason. A caller on the far end
+  of a bus has to tell "the thing you named is gone, stop retrying" from "I
+  could not answer, retry". A quiet no-op would make a service that lost its
+  thread reference look exactly like one whose writes are landing.
+- **Block rules are not consulted.** There is no sender for a block to be
+  about, and a system line is a statement of what happened rather than
+  somebody reaching somebody. Two people who blocked each other still see that
+  their call was declined.
+
+`client_msg_id` is the existing per-conversation idempotency key, so a caller
+on an at-least-once transport passes one derived from the fact it is recording
+and a redelivery writes one line, not two.
+
+### Notes
+
+- The first WRITE on this module's comm surface; the other two Functions stay
+  reads.
+- `llms.txt` budget raised 5800 → 6000, deliberately, with the argument in the
+  Makefile: the line that cannot be cut is the one saying why the Function is
+  shaped this narrowly, because an agent that reads only "posts a system
+  message" writes the general one it was reaching for.
+- Patch, not minor: additive, nothing existing changes shape.
+
 ## [0.8.0] — 2026-09-04
 
 ### Presence is told to accounts, not to sessions

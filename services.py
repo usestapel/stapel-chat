@@ -72,6 +72,18 @@ class MessageGone(ChatError):
     """The message is already a tombstone — there is nothing left to change."""
 
 
+class ConversationNotFound(LookupError):
+    """No such conversation.
+
+    A ``LookupError``, matching :class:`MessageNotFound` and for the same
+    reason: a caller on the other end of the bus has to be able to tell "the
+    thing you named is gone" (nothing will fix it, stop retrying) from "I
+    could not answer" (retry). A comm Function that returned a quiet no-op for
+    an unknown id would make a service that lost its thread reference look
+    exactly like one whose writes are landing.
+    """
+
+
 class MessageNotFound(LookupError):
     """No such message — or nothing left of it.
 
@@ -364,6 +376,47 @@ def post_message(
                     return twin
             continue
     raise last_err  # pragma: no cover - exhausted retries
+
+
+def post_system_message(
+    conversation_id, body: str, client_msg_id: str = ""
+) -> Message:
+    """Append one SYSTEM line to a conversation, on behalf of no user.
+
+    The service half of the ``chat.post_system_message`` Function, and
+    deliberately not a thin alias for :func:`post_message`: it hard-codes
+    ``sender=None`` and ``kind=system``, so neither the bus nor a host
+    misconfiguration can turn it into a way of saying something *as a person*.
+    In a product where the thread is the record of a deal, a bus-reachable
+    "post as this user" is not a convenience, it is a forgery tool.
+
+    Raises :class:`ConversationNotFound` for an unknown or malformed id — the
+    caller is holding that id for a reason and must be told it is dead.
+
+    Block rules do not apply: there is no sender for two people to have
+    blocked, and a system line is a statement of what happened, not somebody
+    reaching somebody. Two people who blocked each other still get the line
+    saying their call was declined.
+    """
+    body = (body or "").strip()
+    if not body:
+        # The schema already refuses it; this is the second wall, because a
+        # blank system line is a message that renders as nothing and cannot
+        # be edited or deleted (`edit_message` refuses non-text kinds).
+        raise ValueError("a system line needs a body")
+    try:
+        conv = Conversation.objects.filter(pk=conversation_id).first()
+    except (ValidationError, ValueError, TypeError) as exc:
+        raise ConversationNotFound(str(conversation_id)) from exc
+    if conv is None:
+        raise ConversationNotFound(str(conversation_id))
+    return post_message(
+        conversation=conv,
+        sender=None,
+        body=body,
+        kind=MessageKind.SYSTEM,
+        client_msg_id=client_msg_id or "",
+    )
 
 
 def _refuse_if_pair_blocked(user_a, user_b) -> None:

@@ -41,7 +41,15 @@ PYTHON ?= python3
 # the bug this release deletes), and that "online" is the AND of a connection
 # count and a lease so it degrades to offline rather than to a false yes.
 # Trim before raising it again.
-LLMS_BUDGET ?= 5800
+# Raised again in 0.8.1, from 5800, by 200: `chat.post_system_message` is the
+# first WRITE on this module's comm surface, and the line that cannot be cut
+# is the one saying WHY it is shaped so narrowly — sender null and kind system
+# hard-coded, with no way for a caller to name an author. An agent that reads
+# only "posts a system message" writes the general `chat.post_message` it was
+# reaching for, which is a bus-reachable way to put words in a user's mouth in
+# a product where the thread is the record of a deal.
+# Trim before raising it again.
+LLMS_BUDGET ?= 6000
 
 .PHONY: contract contract-check
 

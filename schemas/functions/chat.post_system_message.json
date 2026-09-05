@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "chat.post_system_message",
+  "description": "Write ONE system line into a conversation, from another service. {\"conversation_id\", \"body\", \"client_msg_id\"?} -> {\"message_id\", \"seq\", \"conversation_id\"}. Deliberately narrow: it can only post with sender=null and kind=system, so it cannot be used to say something as a person. A general chat.post_message would be exactly that — a bus-reachable way to put words in a user's mouth, in a product where the thread is the record of a deal. The body is a marker key the reader renders (the convention chat's own lines already use: chat.support.assigned, video.call.ended:188), never a rendered sentence: a rendered string freezes one language and one number format into a row that outlives both, and the reader's locale is not the writer's. client_msg_id is the existing per-conversation idempotency key — pass a deterministic one derived from the fact being recorded and an at-least-once caller writes one line, not a line per redelivery. An unknown conversation_id raises rather than answering silently: a caller that could not record what happened must find out.",
+  "type": "object",
+  "required": ["conversation_id", "body"],
+  "properties": {
+    "conversation_id": {
+      "type": "string",
+      "description": "The conversation to write into."
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The system line. A dot-namespaced marker key, with its one argument after a colon where it has one (video.call.ended:188)."
+    },
+    "client_msg_id": {
+      "type": "string",
+      "description": "Idempotency key, unique per conversation. Omit and a redelivery writes a second line."
+    }
+  },
+  "additionalProperties": false
+}

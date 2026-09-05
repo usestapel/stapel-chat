@@ -1,8 +1,8 @@
-# stapel-chat 0.8.0
+# stapel-chat 0.8.1
 
 Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).
 
-Contract: axes 15 · surface 21 · extension points 9 · operations 13 · error codes 65.
+Contract: axes 15 · surface 22 · extension points 9 · operations 13 · error codes 65.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -63,6 +63,9 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
 - moderation_content — stapel_chat.services.moderation_content
   instead of: stapel_chat.models.Message.objects.get
   Read one message's live content for an external moderation module — body, attachment KEYS, author, conversation. Fetched when it is looked at, so a card shows the message as it is now; a deleted or erased message raises MessageNotFound instead of answering with the empty body a tombstone leaves, because a blank card looks exactly like a message that said nothing.
+- post_system_message — stapel_chat.services.post_system_message
+  instead of: stapel_chat.services.post_message
+  Append ONE system line to a conversation on behalf of no user — sender null, kind system, block rules not consulted (there is no sender for a block to be about). Reach for it whenever a sibling service has to record in a thread that something happened outside chat: a call ended, a booking was confirmed, an order shipped. It is deliberately not `post_message` with sender=None spelled out at each call site, because the narrowness is the safety: nothing routed through this — or through the `chat.post_system_message` Function over it — can say something AS a person, in a product where the thread is the record of a deal. The body is a marker key the reader renders (`chat.support.assigned`, `video.call.ended:188`), never a rendered sentence: the reader's locale is not the writer's.
 - reopen_support — stapel_chat.services.reopen_support
   Reopen a resolved thread with its system line. It re-enters the queue only while no operator is assigned — a reopened thread stays with its previous operator by design.
 - resolve_support — stapel_chat.services.resolve_support

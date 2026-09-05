@@ -202,6 +202,13 @@
       "instead_of": [
         "stapel_chat.models.UserPresence.objects.filter"
       ]
+    },
+    "post_system_message": {
+      "kind": "gate_function",
+      "intent": "Append ONE system line to a conversation on behalf of no user — sender null, kind system, block rules not consulted (there is no sender for a block to be about). Reach for it whenever a sibling service has to record in a thread that something happened outside chat: a call ended, a booking was confirmed, an order shipped. It is deliberately not `post_message` with sender=None spelled out at each call site, because the narrowness is the safety: nothing routed through this — or through the `chat.post_system_message` Function over it — can say something AS a person, in a product where the thread is the record of a deal. The body is a marker key the reader renders (`chat.support.assigned`, `video.call.ended:188`), never a rendered sentence: the reader's locale is not the writer's.",
+      "instead_of": [
+        "stapel_chat.services.post_message"
+      ]
     }
   },
   "axes": {
