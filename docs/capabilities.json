@@ -1,6 +1,6 @@
 {
   "module": "stapel-chat",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "provides": "Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).",
   "axes": [
     {
@@ -357,6 +357,15 @@
       ]
     },
     {
+      "name": "filter_inbox",
+      "kind": "factory",
+      "path": "stapel_chat.services.filter_inbox",
+      "intent": "The inbox's two filters — a search over the three things a row DRAWS (counterpart name, subject card title, last line) and unread-only — applied before the anchor page is taken. A body icontains instead finds rows by text nobody can see and misses the two fields that are not in this database.",
+      "instead_of": [
+        "stapel_chat.models.Conversation.objects.filter"
+      ]
+    },
+    {
       "name": "journal_rows",
       "kind": "factory",
       "path": "stapel_chat.services.journal_rows",
@@ -456,6 +465,15 @@
       "intent": "Messages past a participant's marker that somebody else authored — system lines, your own messages and tombstones excluded. A naive seq__gt count lights the badge for your own message, for every system line, and for a message deleted before you got to it: a badge nobody can clear.",
       "instead_of": [
         "stapel_chat.models.Message.objects.count"
+      ]
+    },
+    {
+      "name": "with_viewer_unread",
+      "kind": "factory",
+      "path": "stapel_chat.services.with_viewer_unread",
+      "intent": "Annotate the caller's unread count onto a whole PAGE of conversations — the read marker, then a count over it, two subqueries however many rows. Any list that draws a badge wants this; unread_count per row is one query per conversation.",
+      "instead_of": [
+        "stapel_chat.services.unread_count"
       ]
     }
   ],

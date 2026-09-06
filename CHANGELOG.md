@@ -4,6 +4,79 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] — 2026-09-06
+
+### Added — the conversation list can be searched and narrowed to unread
+
+`GET /chat/api/v1/conversations` took `anchor`, `direction` and `limit` and
+nothing else, so a thread list's toolbar could only narrow the pages a client
+had **already loaded**: a search box that reads twenty rows and reports
+"nothing found" over an inbox of three hundred. Two query parameters now make
+that server-side and exact.
+
+**`search` matches the three things an inbox row DRAWS, and nothing else** —
+who the thread is with, what it is about, and the last line. That constraint
+is the design, not a shortcut: a row that comes back for a word nobody can see
+on it reads as a bug in the search box, and the obvious wider implementation
+(one `icontains` over message bodies) finds rows by an old message, by a
+tombstone and by a system marker like `video.call.ended:188`, while still
+missing the two fields that are not in this database at all.
+
+- **The counterpart's display name** — over the user-model paths
+  `SEARCH_NAME_FIELDS` names (`username`, `first_name`, `last_name` by
+  default, traversal allowed). It is a config axis rather than three hard-coded
+  columns because a display name is the host's to define, and a search that
+  matched a field nobody renders would find rows by invisible text again. A
+  path that does not resolve is `stapel_chat.E021` **at boot**, not a 500 on
+  the first search somebody types. The reader's OWN name is not searched: the
+  row says who it is *with*.
+- **The subject card's title** — resolved through the same batched
+  `card_function` the header uses, read only at the fields the subject type's
+  new `search_fields` policy names (`title` by default). This is the one place
+  anything here looks inside a card, and it is the host pointing at its own
+  title rather than this module learning what a listing is.
+- **The last message's body** — the row at `Conversation.last_seq`, and only
+  when it is neither a tombstone nor a system line.
+
+**`unread=true`** keeps the conversations whose `unread_count` is above zero
+for the caller. It filters on the same subquery the count itself is produced
+from, so the chip and the badge cannot disagree — a filter with its own
+private definition of "unread" is how a list ends up showing rows with no
+badge on them.
+
+**Both filter BEFORE the page is taken**, so `anchor` / `direction` / `limit`
+mean exactly what they mean without a filter and paging a search cannot
+surface a row the search excluded.
+
+### Changed — a page of conversations no longer costs a query per conversation
+
+`unread_count` was read per row: fifty conversations, fifty counts. The list
+now annotates the count for the whole page (`services.with_viewer_unread` — the
+read marker, then a count over it) and `conversation_to_dto` reads the
+annotation, falling back to the per-row call for the single-conversation reads
+that have none. Same numbers, two queries instead of N.
+
+The other new cost is bounded on purpose. A subject's title lives in whoever
+owns the subject, so matching it resolves cards for at most
+`SEARCH_SUBJECT_SCAN` (500) of the caller's newest subject threads — one
+batched call per subject type, handed on to the page that is about to render
+so the same provider is not asked the same keys twice in one request, and
+never one call per row. Past the bound a thread is still found by name and by
+its last line, and the truncation is logged rather than looking like an empty
+catalogue. `0` turns title matching off for a deployment whose catalogue is
+slow or absent.
+
+### Notes
+
+- New config: `SEARCH_NAME_FIELDS`, `SEARCH_SUBJECT_SCAN` (wiring and tuning —
+  not CTO-facing axes, like the `PRESENCE_*` pair). New check
+  `stapel_chat.E021`. New subject-type policy key `search_fields`.
+- An `unread` value that is not a yes is no filter, rather than a 400: a list
+  endpoint that refuses an unknown query parameter breaks every client that
+  adds one.
+- `llms.txt` budget raised 6000 → 6200, with the argument in the Makefile.
+- Patch, not minor: additive, nothing existing changes shape or meaning.
+
 ## [0.8.1] — 2026-09-05
 
 ### Added — `chat.post_system_message`: a sibling service can record what happened

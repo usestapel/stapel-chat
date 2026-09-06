@@ -570,7 +570,7 @@ Everything above also exists over REST, because rehydration, history paging and
 the support lifecycle are not socket work:
 
 ```
-GET|POST   /chat/api/v1/conversations
+GET|POST   /chat/api/v1/conversations           ?search=… &unread=true
 GET        /chat/api/v1/conversations/{id}
 GET|POST   /chat/api/v1/conversations/{id}/messages
 PATCH|DELETE /chat/api/v1/conversations/{id}/messages/{message_id}
@@ -583,6 +583,41 @@ POST       /chat/api/v1/support/conversations/{id}/{assign,resolve,reopen}
 `DELETE` answers **200 with the stripped message**, not 204 — the caller is
 handed the exact row shape that says "this id is now empty", which is what a
 local cache purges against.
+
+#### Finding one conversation — `?search=` and `?unread=true` (0.8.2)
+
+`GET /conversations` takes two filters beside `anchor` / `direction` / `limit`:
+
+```
+GET /chat/api/v1/conversations?search=bicycle&unread=true&limit=20
+```
+
+`search` is a case-insensitive substring over **the three things an inbox row
+draws**, and nothing else:
+
+| Field | Where it comes from |
+|---|---|
+| the counterpart's **display name** | the user-model paths `STAPEL_CHAT["SEARCH_NAME_FIELDS"]` names (`username`, `first_name`, `last_name` out of the box — swap them where a host's display name comes from somewhere else). Your own name is not one of them: the row says who it is *with*. |
+| the **subject card's title** | the card the subject type's `card_function` resolves, read at the fields that type's `search_fields` policy names (`title` by default). This is the one place anything reads inside a card, and the host says where. |
+| the **last message's body** | the row at `Conversation.last_seq`. A tombstone and a system line are never matched — a deleted message renders as deleted and a system line is machine vocabulary (`video.call.ended:188`), so neither is text a reader can see. An *older* message is not matched either: it is not on the row. |
+
+`unread=true` keeps the conversations whose `unread_count` is above zero for
+the caller — the same subquery the count itself comes from, so the chip and the
+badge cannot disagree. Any other value is no filter; a list endpoint that 400s
+on a query parameter breaks every client that adds one.
+
+**Both filter BEFORE the page is taken.** The anchor then walks the filtered
+list, so `anchor` / `direction` / `limit` mean exactly what they mean without a
+filter, and paging a search can never surface a row the search excluded.
+
+Two costs are bounded on purpose. The unread count is annotated for the whole
+page (two subqueries), not read per row. And because a subject's title lives in
+whoever owns the subject rather than in this database, matching it resolves
+cards for at most `STAPEL_CHAT["SEARCH_SUBJECT_SCAN"]` of the caller's newest
+subject threads (500; `0` turns it off) — one batched call per subject type,
+reused by the page that is about to render, never one call per row. Past that
+bound a thread is still found by name and by its last line, and the truncation
+is logged rather than looking like an empty catalogue.
 
 ### Host ASGI assembly (`routing.py`)
 

@@ -33,6 +33,8 @@ deployment that shipped "updates every few seconds" never chose it either.
 | PRESENCE_TTL_S | env | tuning: seconds a live socket's evidence of life stands without renewal. Keep it above PRESENCE_WRITE_THROTTLE_S. | no | 90 |
 | PRESENCE_WRITE_THROTTLE_S | env | tuning: least seconds between two presence writes for one user; 0 writes on every touch. | no | 30 |
 | PRESENCE_FANOUT_LIMIT | env | tuning: most conversation streams one presence transition fans out to, newest first; 0 leaves presence a REST-only fact. | no | 200 |
+| SEARCH_NAME_FIELDS | env | wiring: the user-model field paths a counterpart's DISPLAY NAME is made of, for `GET /conversations?search=`. Traversal allowed (`profile__display_name`); a path that does not resolve is `stapel_chat.E021` at boot. `[]` searches no name at all. | no | [username, first_name, last_name] |
+| SEARCH_SUBJECT_SCAN | env | tuning: how many of the caller's newest SUBJECT threads one search may resolve cards for (a subject's title lives in whoever owns the subject — one batched call per type, never one per row). Older threads are still matched by name and last line; 0 turns title matching off. | no | 500 |
 | PRESENCE_REQUIRES_ACCOUNT | env | axis: whether presence is disclosed only to participants with an ACCOUNT. A guest session (IsAuthenticated, nobody registered) is answered with the offline default and sent no flip. False is the pre-0.8.0 answer. | no | true |
 
 ## Host settings this module requires (not its own namespace)

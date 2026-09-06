@@ -16,10 +16,22 @@ the durable rows by ``seq``.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import (
+    BigIntegerField,
+    Count,
+    Exists,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Value,
+)
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from stapel_core.comm import mutate_and_emit
 
@@ -41,6 +53,8 @@ from .models import (
     SupportStatus,
     _direct_key,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Cap on seq-allocation retries. select_for_update serializes senders on a real
 #: DB (one retry at most); the retry loop is the backstop for backends without
@@ -767,6 +781,186 @@ def unread_count(*, conversation: Conversation, participant: ConversationPartici
     )
 
 
+# ── Finding one conversation in an inbox ────────────────────────────────
+
+
+def _unread_rows(*, viewer):
+    """The messages that make a conversation unread FOR ``viewer``.
+
+    ONE definition for the count on every row AND for the ``unread=true``
+    filter — a chip that filtered on a different rule than the badge counts on
+    is how a list ends up showing rows with no badge on them. It restates
+    :func:`unread_count` for a whole page (that one takes a concrete
+    participant row; this one an ``OuterRef``), and the two are pinned against
+    each other in ``tests/test_inbox_search.py``.
+
+    Anchored on the ``viewer_last_read_seq`` annotation
+    (:func:`with_viewer_unread`), so it is a subquery per PAGE, not per row.
+    """
+    return Message.objects.filter(
+        conversation=OuterRef("pk"),
+        seq__gt=OuterRef("viewer_last_read_seq"),
+        sender__isnull=False,
+        deleted_at__isnull=True,
+    ).exclude(sender_id=viewer.pk)
+
+
+def with_viewer_unread(qs, *, viewer):
+    """Annotate ``viewer_unread`` on a conversation queryset.
+
+    Two subqueries for a whole page — the read marker, then the count over it —
+    where :func:`unread_count` is one query per conversation. The list view
+    reads the annotation, and a fifty-row inbox stops costing fifty counts.
+    :func:`conversation_to_dto` falls back to the per-row call when it is
+    handed a conversation nobody annotated (the single-conversation reads).
+    """
+    marked = qs.annotate(
+        viewer_last_read_seq=Coalesce(
+            Subquery(
+                ConversationParticipant.objects.filter(
+                    conversation=OuterRef("pk"), user=viewer
+                ).values("last_read_seq")[:1],
+                output_field=BigIntegerField(),
+            ),
+            Value(0),
+            output_field=BigIntegerField(),
+        )
+    )
+    counted = (
+        _unread_rows(viewer=viewer)
+        .order_by()
+        .values("conversation")
+        .annotate(n=Count("id"))
+        .values("n")
+    )
+    return marked.annotate(
+        viewer_unread=Coalesce(
+            Subquery(counted, output_field=IntegerField()),
+            Value(0),
+            output_field=IntegerField(),
+        )
+    )
+
+
+def _subject_title_matches(qs, *, needle: str):
+    """``(ids whose subject card matches, {(type, key): resolution})``.
+
+    A subject's title is not in this database — it belongs to whoever owns the
+    subject — so matching it means resolving cards, which is a batched comm
+    call per subject type. That is bounded twice: only conversations that carry
+    a subject are scanned, and only ``SEARCH_SUBJECT_SCAN`` of them, newest
+    first. Threads past the bound are still findable by name and by their last
+    line; only the title match stops there, and it says so in the log rather
+    than looking like an empty catalogue.
+
+    The resolutions come back so the page that is about to be rendered reuses
+    them instead of asking the same provider the same question twice.
+    """
+    from .conf import chat_settings
+    from .subjects import card_matches, get_subject_types, resolve_cards
+
+    limit = int(chat_settings.SEARCH_SUBJECT_SCAN or 0)
+    if limit <= 0:
+        return [], {}
+    rows = list(
+        qs.exclude(subject_type="")
+        .exclude(subject_key="")
+        .order_by("-updated_at")
+        # updated_at rides along because this queryset is DISTINCT and Postgres
+        # refuses to order a DISTINCT select by a column that is not in it.
+        .values_list("id", "subject_type", "subject_key", "updated_at")[: limit + 1]
+    )
+    truncated = len(rows) > limit
+    if truncated:
+        rows = rows[:limit]
+        logger.warning(
+            "stapel_chat: inbox search scanned only the newest %d subject "
+            "threads; older ones were matched by name and last line only "
+            "(raise STAPEL_CHAT['SEARCH_SUBJECT_SCAN'] if that is too few)",
+            limit,
+        )
+    resolved = resolve_cards({(row[1], row[2]) for row in rows})
+    types = get_subject_types()
+    ids = [
+        row[0]
+        for row in rows
+        if card_matches(
+            row[1], (resolved.get((row[1], row[2])) or {}).get("card"), needle, types
+        )
+    ]
+    return ids, resolved
+
+
+def _search_inbox(qs, *, viewer, needle: str):
+    """Narrow a conversation queryset to the rows a person could recognise by
+    ``needle`` — ``(queryset, {(type, key): resolution})``.
+
+    Three fields, and they are exactly the three an inbox row DRAWS: WHO the
+    thread is with (the counterpart's display name, over the user-model fields
+    ``SEARCH_NAME_FIELDS`` names), WHAT it is about (the subject card's title),
+    and the last line. A row cannot be found by a word that is nowhere on it,
+    which is why ids, kinds and timestamps are not searched, and why the last
+    line is matched only when the row would actually show it: a tombstone
+    renders as "deleted" and a system line as machine vocabulary
+    (``video.call.ended:188``), so neither is searchable text.
+
+    The match is a case-insensitive substring (``icontains``), and it FILTERS —
+    the anchor pagination then pages the filtered set, so ``anchor`` /
+    ``direction`` / ``limit`` mean exactly what they mean without a search.
+    """
+    needle = (needle or "").strip()
+    if not needle:
+        return qs, {}
+
+    from .conf import chat_settings
+
+    name_q = Q()
+    for path in chat_settings.SEARCH_NAME_FIELDS or ():
+        name_q |= Q(**{f"user__{str(path).strip()}__icontains": needle})
+
+    matched = Q()
+    if name_q:
+        matched |= Q(
+            Exists(
+                ConversationParticipant.objects.filter(conversation=OuterRef("pk"))
+                .exclude(user_id=viewer.pk)
+                .filter(name_q)
+            )
+        )
+    # The LAST line, found by its seq: Conversation.last_seq is the thread's
+    # high-water mark, so this is the row the inbox draws, not any older one
+    # that happens to contain the word.
+    matched |= Q(
+        Exists(
+            Message.objects.filter(
+                conversation=OuterRef("pk"),
+                seq=OuterRef("last_seq"),
+                sender__isnull=False,
+                deleted_at__isnull=True,
+                body__icontains=needle,
+            )
+        )
+    )
+    subject_ids, resolutions = _subject_title_matches(qs, needle=needle)
+    if subject_ids:
+        matched |= Q(id__in=subject_ids)
+    return qs.filter(matched), resolutions
+
+
+def filter_inbox(qs, *, viewer, search: str = "", unread_only: bool = False):
+    """The conversation list's two filters, applied BEFORE pagination.
+
+    Returns ``(queryset, {(subject_type, subject_key): resolution})`` — the
+    second is whatever the search already resolved, handed to
+    :func:`subject_cards_for` so one request asks a card provider once.
+    """
+    if unread_only:
+        if "viewer_unread" not in qs.query.annotations:
+            qs = with_viewer_unread(qs, viewer=viewer)
+        qs = qs.filter(viewer_unread__gt=0)
+    return _search_inbox(qs, viewer=viewer, needle=search)
+
+
 def journal_rows(*, conversation_id, after_seq: int, limit: int):
     """Rows a resuming socket has not seen, ordered by ``rev_seq``.
 
@@ -1055,12 +1249,18 @@ def presence_for(conversations, viewer=None) -> dict:
     return snapshot(user_ids)
 
 
-def subject_cards_for(conversations) -> dict:
+def subject_cards_for(conversations, resolved=None) -> dict:
     """``[Conversation, …] -> {conversation_id: resolution}`` — one call per
     subject type for the whole list, never one per conversation.
 
     A conversation with no subject is simply absent from the answer; that is
     not a degradation, it is a thread about nothing in particular.
+
+    ``resolved`` is a ``{(type, key): resolution}`` map a caller already has —
+    the inbox search resolves cards to match titles, and asking the same
+    provider for the same keys again in the same request would be a second
+    round trip for an answer already in hand. Only the pairs it does not cover
+    are fetched.
     """
     from .subjects import resolve_cards
 
@@ -1071,9 +1271,12 @@ def subject_cards_for(conversations) -> dict:
     }
     if not pairs:
         return {}
-    resolved = resolve_cards(pairs)
+    known = {pair: resolution for pair, resolution in (resolved or {}).items()}
+    missing = pairs - set(known)
+    if missing:
+        known.update(resolve_cards(missing))
     return {
-        str(c.id): resolved[(c.subject_type, c.subject_key)]
+        str(c.id): known[(c.subject_type, c.subject_key)]
         for c in conversations
-        if (c.subject_type, c.subject_key) in resolved
+        if (c.subject_type, c.subject_key) in known
     }

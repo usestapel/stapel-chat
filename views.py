@@ -6,7 +6,7 @@ see and what ``scope_key`` a new conversation gets. History and conversation
 lists are anchor-paginated (core ``AnchorPagination``): message history anchors
 on ``seq`` — the canonical anchor case — and supports both directions.
 """
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import permissions, status
 from rest_framework.views import APIView
 from stapel_core.django.api.errors import StapelErrorResponse, StapelResponse
@@ -219,11 +219,19 @@ def conversation_to_dto(
     # map in; a caller that passes none simply ships the offline default,
     # which is the honest degradation (never a fabricated "online").
     presence = presence or {}
-    unread = (
-        services.unread_count(conversation=conv, participant=viewer_participant)
-        if viewer_participant is not None
-        else 0
-    )
+    # A list annotates the count for the whole page (services.with_viewer_unread)
+    # — reading it per row was one query per conversation, which is the shape a
+    # fifty-row inbox must never have. A single-conversation read is handed no
+    # annotation and pays the one count it needs.
+    annotated = getattr(conv, "viewer_unread", None)
+    if annotated is not None:
+        unread = int(annotated)
+    else:
+        unread = (
+            services.unread_count(conversation=conv, participant=viewer_participant)
+            if viewer_participant is not None
+            else 0
+        )
     return ConversationResponse(
         id=str(conv.id),
         kind=conv.kind,
@@ -287,6 +295,18 @@ def _my_participant(conv, user):
     return None
 
 
+#: Query-string spellings of "yes". A flag is on when it says so; anything else
+#: (including "false", "0" and a typo) leaves the filter off, because a list
+#: endpoint that 400s on a stray query parameter breaks every client that adds
+#: one it knows nothing about.
+_TRUTHY = {"true", "1", "yes", "on"}
+
+
+def _flag(request, name: str) -> bool:
+    """A boolean query parameter, read leniently — see :data:`_TRUTHY`."""
+    return str(request.query_params.get(name, "")).strip().lower() in _TRUTHY
+
+
 def _support_enabled() -> bool:
     return ConversationKind.SUPPORT in chat_settings.CHAT_KINDS
 
@@ -314,7 +334,46 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
     response_serializer_class = ConversationResponseSerializer
     pagination_class = ConversationListPagination
 
-    @extend_schema(responses={200: ConversationResponseSerializer(many=True)})
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="search",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description=(
+                    "Case-insensitive substring over the three things an inbox "
+                    "row draws: the COUNTERPART'S DISPLAY NAME (the user-model "
+                    "fields STAPEL_CHAT['SEARCH_NAME_FIELDS'] names — username, "
+                    "first name and last name out of the box), the SUBJECT "
+                    "CARD'S TITLE where the thread carries a subject (the "
+                    "fields that subject type's `search_fields` policy names, "
+                    "`title` by default), and the LAST MESSAGE'S body. A "
+                    "tombstone and a system line are never matched — neither is "
+                    "text a reader can see. Filters BEFORE paging: anchor, "
+                    "direction and limit walk the filtered list and mean "
+                    "exactly what they mean without a search. Blank or "
+                    "whitespace-only is no search at all. Title matching covers "
+                    "the newest STAPEL_CHAT['SEARCH_SUBJECT_SCAN'] subject "
+                    "threads (500 by default); older ones are still matched by "
+                    "name and last line."
+                ),
+            ),
+            OpenApiParameter(
+                name="unread",
+                type=bool,
+                location=OpenApiParameter.QUERY,
+                description=(
+                    "`true` returns only conversations whose `unread_count` is "
+                    "above zero for the caller — the same rule that produces "
+                    "the number on each row (messages past your read marker, "
+                    "written by somebody else, tombstones and system lines "
+                    "excluded). Any other value is no filter. Composes with "
+                    "`search` (both narrow, then the page is taken)."
+                ),
+            ),
+        ],
+        responses={200: ConversationResponseSerializer(many=True)},
+    )
     def get(self, request):  # noqa: R007
         qs = (
             _scoped(request)
@@ -322,12 +381,24 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
             .distinct()
             .prefetch_related("participants")
         )
+        # The unread count for the WHOLE page in two subqueries, which is also
+        # what `unread=true` filters on — one rule, so the filter and the badge
+        # can never disagree.
+        qs = services.with_viewer_unread(qs, viewer=request.user)
+        qs, resolved_subjects = services.filter_inbox(
+            qs,
+            viewer=request.user,
+            search=request.query_params.get("search") or "",
+            unread_only=_flag(request, "unread"),
+        )
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request)
         # ONE card call per subject type for the whole page. Resolving per
         # conversation would make a fifty-row inbox fifty round trips, which
-        # is why the provider contract is a batch in the first place.
-        cards = services.subject_cards_for(page)
+        # is why the provider contract is a batch in the first place. A search
+        # that already resolved these cards hands them over rather than making
+        # the same provider answer the same keys twice in one request.
+        cards = services.subject_cards_for(page, resolved=resolved_subjects)
         # Same batching rule for presence: one query for every participant on
         # the page, never one per row.
         presence = services.presence_for(page, viewer=request.user)

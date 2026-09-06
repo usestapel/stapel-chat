@@ -10,7 +10,9 @@ somebody who does.
 idiom, for the same reason: the pair is a NAME, never a parsed thing. This
 module stores it, hashes it into the direct thread's identity, and resolves it
 to a *card* by calling a comm Function the registry names. Nothing here ever
-looks inside a card.
+looks inside a card except at the fields a policy's ``search_fields`` names,
+and that is the host pointing at its own title, not this module learning what
+a listing is.
 
 **The registry ships EMPTY.** A generic chat has no subject types, and the
 built-in that would have gone here — ``listing`` — belongs to whoever owns
@@ -55,6 +57,12 @@ POLICY_DEFAULTS: dict[str, Any] = {
     "response_field": "cards",
     # i18n key for a rendered label ("Listing"), never a rendered string.
     "label": "",
+    # Which card fields an inbox SEARCH may match on. This is the one place
+    # anything here looks inside a card, and it is the host that says where:
+    # the policy names the fields, chat only compares strings. A type whose
+    # card titles the thing differently ("name", "headline") says so here
+    # instead of forking the search.
+    "search_fields": ["title"],
 }
 
 META_OK = "ok"
@@ -215,6 +223,34 @@ def resolve_cards(pairs: Iterable[tuple]) -> dict[tuple, dict]:
     return out
 
 
+def card_matches(subject_type: str, card, needle: str, types: dict | None = None) -> bool:
+    """Does this card carry ``needle`` in a field its policy calls searchable?
+
+    The comparison is case-insensitive (``casefold``, not ``lower`` — the
+    dotted/dotless i is the standing example) and it is a substring match, the
+    same rule the inbox toolbar applies client-side.
+
+    Only the fields ``search_fields`` names are read, and only when they hold a
+    string: a card is otherwise as opaque here as it is everywhere else, and a
+    search that walked whole card structures would find rows by a currency code
+    or a status flag nobody can see on the row.
+
+    ``types`` lets a caller resolving a page hand in the registry it already
+    merged, so a five-hundred-row scan does not merge it five hundred times.
+    """
+    if not isinstance(card, dict) or not needle:
+        return False
+    registry = types if types is not None else get_subject_types()
+    policy = registry.get(str(subject_type)) or {}
+    fields = policy.get("search_fields") or POLICY_DEFAULTS["search_fields"]
+    folded = needle.casefold()
+    for name in fields:
+        value = card.get(name)
+        if isinstance(value, str) and folded in value.casefold():
+            return True
+    return False
+
+
 __all__ = [
     "BUILTIN_SUBJECT_TYPES",
     "InvalidSubjectPolicy",
@@ -227,6 +263,7 @@ __all__ = [
     "REASON_UNREACHABLE",
     "REASON_UNREGISTERED",
     "UnknownSubjectType",
+    "card_matches",
     "get_subject_types",
     "register_subject_type",
     "reset_subject_types",

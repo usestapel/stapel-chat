@@ -49,7 +49,17 @@ PYTHON ?= python3
 # reaching for, which is a bus-reachable way to put words in a user's mouth in
 # a product where the thread is the record of a deal.
 # Trim before raising it again.
-LLMS_BUDGET ?= 6000
+# Raised again in 0.8.2, from 6000, by 200: the conversation list gained
+# `search` and `unread`, and the line that cannot be cut is the one saying
+# WHICH three fields a search reads — the counterpart's display name, the
+# subject card's title and the LAST line — because they are the three an inbox
+# row draws. An agent that reads only "there is a search parameter" writes the
+# body-icontains it was reaching for: that finds rows by an old message, a
+# tombstone or a system marker (text nobody can see), and misses the two fields
+# that are not in this database at all. The surface entry it costs is the one
+# that keeps a fifty-row inbox from costing fifty unread counts.
+# Trim before raising it again.
+LLMS_BUDGET ?= 6200
 
 .PHONY: contract contract-check
 

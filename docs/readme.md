@@ -73,7 +73,10 @@ pip install 'stapel-chat[realtime]'
 - **Conversations** — `POST /chat/api/v1/conversations` (`direct` / `group` /
   `support`); direct is get-or-create by participant pair. `GET` lists yours
   (anchor-paginated) with `unread_count`, and every row carries its own
-  `stream_key` and `socket_path`.
+  `stream_key` and `socket_path`. `?search=` finds a thread by the three
+  things its row draws — the counterpart's display name, the subject card's
+  title and the last line — and `?unread=true` narrows to the rows with a
+  badge; both filter before the page is taken, so the anchor keeps its meaning.
 - **Messages** — `GET/POST /chat/api/v1/conversations/{id}/messages`,
   `PATCH/DELETE .../messages/{message_id}`. History is anchored on `seq`,
   newest-first, both directions.

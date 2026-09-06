@@ -463,6 +463,65 @@ def check_activity_registry(app_configs, **kwargs):
     return issues
 
 
+# ── Inbox search (0.8.2) ─────────────────────────────────────────────────
+
+
+@checks.register(checks.Tags.compatibility)
+def check_search_name_fields(app_configs, **kwargs):
+    """The fields a counterpart is searched BY must exist on the user model.
+
+    ``SEARCH_NAME_FIELDS`` is a list of ORM paths (traversal with ``__`` is
+    allowed, e.g. ``profile__display_name``), and a path that resolves to
+    nothing is a ``FieldError`` — a 500 on the first search a real person
+    types, in the deployment that swapped the user model and forgot this. An
+    empty list is legal and silent: a deployment that does not want threads
+    findable by who they are with says so by emptying it.
+    """
+    from django.contrib.auth import get_user_model
+    from django.core.exceptions import FieldDoesNotExist
+
+    from .conf import chat_settings
+
+    paths = chat_settings.SEARCH_NAME_FIELDS
+    if paths in (None, ""):
+        return []
+    if not isinstance(paths, (list, tuple)):
+        return [
+            checks.Error(
+                "STAPEL_CHAT['SEARCH_NAME_FIELDS'] must be a list of user-model "
+                f"field paths (got {type(paths).__name__}).",
+                id="stapel_chat.E021",
+            )
+        ]
+
+    issues = []
+    for path in paths:
+        model = get_user_model()
+        walked = []
+        for segment in str(path).split("__"):
+            walked.append(segment)
+            try:
+                field = model._meta.get_field(segment)
+            except (FieldDoesNotExist, AttributeError):
+                issues.append(
+                    checks.Error(
+                        f"STAPEL_CHAT['SEARCH_NAME_FIELDS'] names {path!r}, but "
+                        f"{'__'.join(walked)!r} is not a field on "
+                        f"{model._meta.label}. A conversation search would raise "
+                        "instead of finding anything.",
+                        hint="Name the fields this deployment's display name is "
+                             "made of; traversal is allowed "
+                             "(e.g. 'profile__display_name').",
+                        id="stapel_chat.E021",
+                    )
+                )
+                break
+            related = getattr(field, "related_model", None)
+            if related is not None:
+                model = related
+    return issues
+
+
 # ── Subjects and blocks (0.6.0) ──────────────────────────────────────────
 
 

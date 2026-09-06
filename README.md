@@ -24,11 +24,11 @@ pip install stapel-chat
 
 | Fact | Value |
 |---|---|
-| Version | `0.8.1` |
+| Version | `0.8.2` |
 | Python | `>=3.11` (3.11, 3.12, 3.13, 3.14) |
 | HTTP operations | 13 |
 | Config axes | 15 |
-| Usage surface | 22 |
+| Usage surface | 24 |
 | Extension points | 9 |
 | Error codes | 65 |
 | Fleet dependencies | [`stapel-auth`](https://github.com/usestapel/stapel-auth) (optional) · [`stapel-cdn`](https://github.com/usestapel/stapel-cdn) (optional) · [`stapel-core`](https://github.com/usestapel/stapel-core) · [`stapel-realtime`](https://github.com/usestapel/stapel-realtime) |
@@ -112,7 +112,10 @@ pip install 'stapel-chat[realtime]'
 - **Conversations** — `POST /chat/api/v1/conversations` (`direct` / `group` /
   `support`); direct is get-or-create by participant pair. `GET` lists yours
   (anchor-paginated) with `unread_count`, and every row carries its own
-  `stream_key` and `socket_path`.
+  `stream_key` and `socket_path`. `?search=` finds a thread by the three
+  things its row draws — the counterpart's display name, the subject card's
+  title and the last line — and `?unread=true` narrows to the rows with a
+  badge; both filter before the page is taken, so the anchor keeps its meaning.
 - **Messages** — `GET/POST /chat/api/v1/conversations/{id}/messages`,
   `PATCH/DELETE .../messages/{message_id}`. History is anchored on `seq`,
   newest-first, both directions.

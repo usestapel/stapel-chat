@@ -119,6 +119,20 @@
         "stapel_chat.models.Message.objects.count"
       ]
     },
+    "with_viewer_unread": {
+      "kind": "factory",
+      "intent": "Annotate the caller's unread count onto a whole PAGE of conversations — the read marker, then a count over it, two subqueries however many rows. Any list that draws a badge wants this; unread_count per row is one query per conversation.",
+      "instead_of": [
+        "stapel_chat.services.unread_count"
+      ]
+    },
+    "filter_inbox": {
+      "kind": "factory",
+      "intent": "The inbox's two filters — a search over the three things a row DRAWS (counterpart name, subject card title, last line) and unread-only — applied before the anchor page is taken. A body icontains instead finds rows by text nobody can see and misses the two fields that are not in this database.",
+      "instead_of": [
+        "stapel_chat.models.Conversation.objects.filter"
+      ]
+    },
     "support_queue": {
       "kind": "factory",
       "intent": "The operator queue as a queryset: unassigned support threads still open or pending, oldest first. Pass qs= to pre-scope it rather than re-deriving the filter — a second copy of \"what is still waiting\" drifts from the one assign_operator enforces."

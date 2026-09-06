@@ -51,6 +51,11 @@ CTO-facing config axes (capability-config.md §16):
   out of the box. Each policy names the ``card_function`` that renders that
   subject. A marketplace declares ``listing`` here; a generic chat declares
   nothing and every thread is about nothing in particular.
+- ``SEARCH_NAME_FIELDS`` / ``SEARCH_SUBJECT_SCAN`` — how ``GET
+  /conversations?search=`` finds a thread by WHO it is with and WHAT it is
+  about. The first names the user-model fields a display name is made of (the
+  default is what ``stapel_core``'s user profile presenter renders); the
+  second bounds how many subject cards one search may resolve.
 - ``BLOCK_ENFORCEMENT`` / ``BLOCK_FUNCTION`` — whether a blocked party may
   OPEN a direct thread with the other party or send into one, and who is
   asked. See ``blocks.py``: a provider that is present and failing is a 503,
@@ -145,6 +150,27 @@ DEFAULTS = {
     # both. False is the pre-0.8.0 answer, stated rather than inherited. On a
     # user model with no guests this changes nothing.
     "PRESENCE_REQUIRES_ACCOUNT": True,
+    # The user-model field paths a counterpart's DISPLAY NAME is made of, for
+    # `GET /conversations?search=`. The default is the one stapel-core's
+    # UserProfilePresenter renders (`display_name` sources `username`) plus the
+    # two name halves AbstractUser carries. A deployment that swapped the
+    # presenter — or that keeps names in a profile table — names its own paths
+    # here (`profile__display_name` traverses, as anywhere in the ORM), because
+    # a search that matched a field nobody renders would find rows by text that
+    # is nowhere on the screen. An empty list searches no name at all; a path
+    # that does not resolve is a boot error (stapel_chat.E021) rather than a
+    # 500 on the first search.
+    "SEARCH_NAME_FIELDS": ["username", "first_name", "last_name"],
+    # How many of the caller's most-recently-updated SUBJECT threads one search
+    # may resolve cards for. The subject's title lives in whoever owns the
+    # subject, not here, so matching it costs one batched card call per subject
+    # type (SUBJECT_CARD_TIMEOUT_S each) over this many keys — never one call
+    # per row, and never an unbounded key list handed to a catalogue. Threads
+    # past the bound are still found by name and by their last line; only the
+    # title match stops, and the truncation is logged rather than guessed at.
+    # 0 turns title matching off entirely (a deployment whose provider is slow,
+    # or that has no subjects, pays nothing).
+    "SEARCH_SUBJECT_SCAN": 500,
     # Whether a block stops opening a NEW direct thread and sending into one.
     # It never stops `create_direct` from RETURNING a thread that already
     # exists: that is a read of history, and this fleet's blocks do not
