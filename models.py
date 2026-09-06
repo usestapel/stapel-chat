@@ -216,6 +216,16 @@ class ConversationParticipant(models.Model):
     UI that draws one tick and two ticks needs both. Both markers only ever
     move forward, and both are readable over REST, which is what lets the
     live receipt travel as an ephemeral Signal instead of a durable event.
+
+    ``left_at`` is when this participant LEFT the thread, and ``null`` for
+    everyone who is still in it. Leaving **hides** — the row stays, the
+    messages stay, and the other participants keep the whole conversation.
+    The row has to stay: it carries the read markers, it is what a direct
+    thread's uniqueness is built on, and deleting it would take the history
+    away from somebody who only asked for the thread to leave their inbox.
+    A message somebody *writes* clears the marker again for everyone in the
+    thread (:func:`stapel_chat.services.leave_conversation` states the whole
+    rule) — a thread being written in is a live thread.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -232,6 +242,12 @@ class ConversationParticipant(models.Model):
     )
     last_read_seq = models.PositiveBigIntegerField(default=0)
     last_delivered_seq = models.PositiveBigIntegerField(default=0)
+    # Null = still in the thread. See the class docstring: this hides, it
+    # does not remove. No index of its own — every read of it is already
+    # narrowed to one user's participations by `chat_participant_user`, and
+    # a second index on a column that is null for almost every row would be
+    # paid for by every send.
+    left_at = models.DateTimeField(null=True, blank=True, default=None)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

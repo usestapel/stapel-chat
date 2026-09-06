@@ -4,6 +4,66 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] — 2026-09-06
+
+### Added — a person can leave a conversation
+
+`DELETE /chat/api/v1/conversations/{id}` answered **405**: there was no route,
+so nobody could get a thread off their list and a test fixture had no way to
+clean one up. The verb now exists, and it is the caller **leaving**:
+
+```
+DELETE /chat/api/v1/conversations/{id}   ->  204 No Content
+```
+
+What it does, in full:
+
+- the caller's participant row is stamped `left_at` — the thread drops off
+  their conversation list, out of their unread counts and out of `?search=`
+  (one rule, `services.inbox_of`, which the list, the badge and the `unread`
+  chip all read);
+- their live subscription to that thread is revoked, and presence stops being
+  announced into it — a green dot for somebody who is not in the room is the
+  same lie as a badge over a thread nobody can open;
+- a `system` line records the departure in the thread itself:
+  `chat.participant.left:<user_id>`. Machine vocabulary like every other
+  marker this module writes — the words a row draws come from
+  `STAPEL_CHAT["SYSTEM_LINE_LABELS"]`, and the id after the colon is there so
+  a client can name the person without this module inventing a sentence in a
+  language it does not own;
+- `ConversationResponse.participants[].left_at` carries the durable half of
+  that line, so a client that was not connected when it was posted reads the
+  state instead of replaying history.
+
+What it deliberately does **not** do:
+
+- **it deletes nothing.** Every message stays, every other participant keeps
+  the thread exactly as it was, and the leaver still reaches their own history
+  by id. In a marketplace thread the messages are the record of a deal between
+  two people, and one of them tidying their inbox is not the other's consent
+  to destroy it. The participant row stays for the same reason it must: it
+  carries the read markers and it is what a direct thread's uniqueness is
+  built on.
+- **it is not a staff hard delete.** Erasure has one path in this fleet —
+  `user.deleted` into `ChatGDPRProvider` — and a second door onto the same
+  rows is a second door to get wrong.
+
+**A new message brings the thread back.** Any *authored* message clears the
+marker for everyone in the thread. The alternative is a counterpart typing
+into a room that silently no longer reaches anybody, and this module will not
+deliver into a thread the recipient cannot see. A **system** line resurfaces
+nobody — including the departure line itself, which would otherwise put the
+thread straight back in the leaver's inbox with their own goodbye on it.
+
+Read markers are **not** touched: leaving is not reading, and a thread that
+comes back comes back with the badge it had. `DELETE` is idempotent — a second
+call is another `204` and writes no second line — and a caller who is not a
+party gets the module's one membership refusal, `403
+error.403.chat_not_participant`, the same answer `GET` on that URL gives them.
+
+Migration `0006_participant_left_at`: one nullable column, no backfill,
+reversible by dropping it.
+
 ## [0.8.4] — 2026-09-06
 
 ### Added — `preview_reason` names which `body_preview: null` this is

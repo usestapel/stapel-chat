@@ -77,6 +77,13 @@ pip install 'stapel-chat[realtime]'
   things its row draws — the counterpart's display name, the subject card's
   title and the last line — and `?unread=true` narrows to the rows with a
   badge; both filter before the page is taken, so the anchor keeps its meaning.
+- **Leaving** — `DELETE /chat/api/v1/conversations/{id}` is the caller leaving,
+  not a delete: the thread drops off *their* list, counts and search, their
+  live subscription is revoked and a `chat.participant.left` system line
+  records it — while every message, every other participant and their own
+  history by id stay exactly as they were. A new message from the other side
+  brings the thread back. Staff erasure is not on this surface: user data has
+  one deletion path, `user.deleted`.
 - **Messages** — `GET/POST /chat/api/v1/conversations/{id}/messages`,
   `PATCH/DELETE .../messages/{message_id}`. History is anchored on `seq`,
   newest-first, both directions.

@@ -497,6 +497,24 @@ def _participant_ids(conv: Conversation) -> list:
     ]
 
 
+def _fanout_recipients(conv: Conversation) -> list:
+    """Whose INBOX stream a frame from this thread goes to.
+
+    Everyone in the thread except those who have left it — a left thread is
+    off that person's list, and pushing a row into an inbox that does not
+    show it is how a badge appears over nothing. Callers who have just
+    written an authored message never lose anybody this way:
+    :func:`_resurface_participants` has already cleared the markers by the
+    time this reads them.
+    """
+    return [
+        str(uid)
+        for uid in ConversationParticipant.objects.filter(
+            conversation=conv, left_at__isnull=True
+        ).values_list("user_id", flat=True)
+    ]
+
+
 def _allocate_seq(conversation_pk) -> tuple[Conversation, int]:
     """Lock the conversation row and take the next journal sequence.
 
@@ -531,9 +549,32 @@ def _post_once(
             attachments=attachments,
             client_msg_id=client_msg_id,
         )
+        # Before the fan-out reads its recipients: somebody wrote here, so the
+        # thread is live again for everyone in it (see `leave_conversation`).
+        _resurface_participants(conv, sender)
         emit("chat.message", _message_payload(msg, conv), key=str(conv.pk))
         _schedule_fanout(msg, conv)
     return msg
+
+
+def _resurface_participants(conv: Conversation, sender) -> None:
+    """An authored message un-hides the thread for everyone who had left it.
+
+    The other half of :func:`leave_conversation`, and the reason leaving is
+    allowed to be as cheap as it is: nobody can be talked to in a thread they
+    cannot see, so a new line brings it back rather than being delivered into
+    a room the recipient closed.
+
+    **A SYSTEM line never resurfaces anybody** (``sender is None`` returns
+    here), and that is not an optimization: the line that says somebody left
+    is itself a system line, and a rule without this clause would put the
+    thread straight back in the leaver's inbox with their own goodbye on it.
+    """
+    if sender is None:
+        return
+    ConversationParticipant.objects.filter(
+        conversation=conv, left_at__isnull=False
+    ).update(left_at=None)
 
 
 def _schedule_fanout(msg: Message, conv: Conversation) -> None:
@@ -541,7 +582,7 @@ def _schedule_fanout(msg: Message, conv: Conversation) -> None:
     participant's inbox. Best-effort: a missed frame is recovered by replaying
     ``rev_seq``. Not an emit (no outbox), so it must run post-commit against
     the durable row."""
-    recipients = _participant_ids(conv)
+    recipients = _fanout_recipients(conv)
     transaction.on_commit(
         lambda: realtime.broadcast_message(msg, conv, participant_ids=recipients)
     )
@@ -554,6 +595,88 @@ def _message_payload(msg: Message, conv: Conversation) -> dict:
     payload["conversation_kind"] = conv.kind
     payload["scope_key"] = conv.scope_key
     return payload
+
+
+# ── Leaving a conversation ──────────────────────────────────────────────
+
+#: The system marker a departure posts. Machine vocabulary, like every other
+#: marker this module writes (``chat.support.resolved``): the words a row
+#: draws are the deployment's, through ``STAPEL_CHAT['SYSTEM_LINE_LABELS']``.
+#: The body carries the leaver's id after the colon —
+#: ``chat.participant.left:<user_id>`` — which is the argument form
+#: :func:`system_line_label` already looks a label up around, so a client can
+#: render "<name> left the conversation" from the id while the label stays
+#: static text this module never interpolates a name into.
+SYSTEM_MARKER_LEFT = "chat.participant.left"
+
+
+def leave_conversation(*, conversation: Conversation, user) -> bool:
+    """``user`` leaves ``conversation``. Returns True if anything changed.
+
+    **Leaving hides; it does not remove.** The participant row is stamped
+    ``left_at`` and stays: the thread drops off this person's inbox and out of
+    their unread counts (:func:`inbox_of`), their open subscription to it is
+    revoked, and everyone else keeps the conversation exactly as it was —
+    every message, every marker, the counterpart still listed. Nothing is
+    deleted for anybody. That is the whole verb, and it is deliberately not
+    "delete the conversation": in a marketplace thread the messages are the
+    record of a deal between two people, and one of them tidying their inbox
+    is not consent from the other to destroy it. **A staff hard delete is not
+    here at all** — erasure has one path in this fleet, ``user.deleted`` into
+    :class:`~stapel_chat.gdpr.ChatGDPRProvider`, and a second door onto the
+    same data is a second door to get wrong.
+
+    **A new message from the other side brings it back.** The marker is
+    cleared for everyone in the thread by any *authored* message
+    (:func:`_resurface_participants`), which is the honest rule for a 1:1: the
+    alternative is a counterpart typing into a room that silently no longer
+    reaches anybody, and this module refuses to deliver into a thread nobody
+    can see. A system line clears nothing — including the one this function
+    posts.
+
+    Idempotent: leaving a thread already left changes nothing, posts no second
+    line and returns False.
+
+    A ``system`` line — ``chat.participant.left:<user_id>``, see
+    :data:`SYSTEM_MARKER_LEFT` — records the departure in the thread itself,
+    so the other participant is told by the transcript rather than by a
+    counterpart who quietly stops answering. It raises no unread badge
+    (system lines never do) and it resurfaces nobody.
+    """
+    with transaction.atomic():
+        marked = ConversationParticipant.objects.filter(
+            conversation=conversation, user=user, left_at__isnull=True
+        ).update(left_at=timezone.now())
+        if not marked:
+            return False
+        post_message(
+            conversation=conversation,
+            sender=None,
+            kind=MessageKind.SYSTEM,
+            body=f"{SYSTEM_MARKER_LEFT}:{user.pk}",
+        )
+        # After commit, and only then: the row that authorized the open
+        # subscription has to be written before the socket is told about it.
+        transaction.on_commit(
+            lambda: realtime.revoke_participant(conversation.pk, user.pk)
+        )
+    return True
+
+
+def inbox_of(qs, *, viewer):
+    """The conversations that belong on ``viewer``'s list.
+
+    A party to the thread who has **not left it** — one rule, in one place,
+    because the list, the unread badge and the ``unread=true`` chip all read
+    it and a thread that left one of the three would show a badge nobody can
+    open. Both conditions land in a single ``filter()`` on purpose: split
+    across two calls the ORM joins the participant table twice and matches
+    "somebody is you" against "somebody has not left", which is every thread
+    with two people in it.
+    """
+    return qs.filter(
+        participants__user=viewer, participants__left_at__isnull=True
+    ).distinct()
 
 
 # ── Editing and deletion ────────────────────────────────────────────────

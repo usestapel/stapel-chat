@@ -1,6 +1,6 @@
 {
   "_comment": "Hand-curated layer of docs/capabilities.json (capability-config.md §2 p.3). The emitter (stapel_chat/_capabilities.py) merges this over the derived axes. Keep language business-facing — it surfaces in CTO conversations, not in code. Note what is NOT an axis: there is no switch for realtime. Since 0.3.0 the WebSocket is the path a message takes, and a deployment that cannot serve one fails manage.py check (stapel_chat.E010-E014) instead of degrading into a product that refreshes on a timer. The `surface` section is the third one (stapel_tools.surface): the domain calls a product is meant to make instead of writing its own — surface_roots select the symbols, and every selected symbol MUST carry an intent line here or emission fails naming it.",
-  "provides": "Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).",
+  "provides": "Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; leaving a thread, which hides it for the person who left and takes nothing away from anybody else (their messages, the other party's copy and their own history by id all stay) and un-hides on the next message written there; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).",
   "requires": [
     {
       "module": "stapel-core",
@@ -161,6 +161,20 @@
     "system_line_label": {
       "kind": "factory",
       "intent": "The words this deployment gave a system marker (SYSTEM_LINE_LABELS), or None. Printing chat.support.resolved or video.call.ended:188 at a reader is what this prevents; an unlabelled marker draws nothing and is found by nothing."
+    },
+    "leave_conversation": {
+      "kind": "gate_function",
+      "intent": "A person leaving a thread: stamps their participant row left_at, posts the chat.participant.left system line and revokes their live subscription — and leaves every message, every marker and every other participant untouched. Stamping the row by hand skips the line (the other side is never told) and the revoke (their socket keeps receiving a thread that is off their list); deleting the participant row instead takes the history, the read markers and a direct thread's identity away from somebody who asked only for a quieter inbox.",
+      "instead_of": [
+        "stapel_chat.models.ConversationParticipant.objects.delete"
+      ]
+    },
+    "inbox_of": {
+      "kind": "factory",
+      "intent": "The conversations that belong on one person's list — a party to the thread who has not left it. Any list, badge or count that filters on participants__user alone shows threads the caller left, and split across two filter() calls the ORM joins the participant table twice and matches \"is you\" against \"has not left\" on different rows, which is every thread with two people in it.",
+      "instead_of": [
+        "stapel_chat.models.Conversation.objects.filter"
+      ]
     },
     "filter_inbox": {
       "kind": "factory",

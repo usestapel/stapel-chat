@@ -70,7 +70,23 @@ PYTHON ?= python3
 # surface entries this costs are the rule, the page annotation, its per-row
 # fallback, the truncation and the system-marker label lookup.
 # Trim before raising it again.
-LLMS_BUDGET ?= 6600
+# Raised again in 0.8.5, from 6600, by 400: a person can now LEAVE a thread,
+# which is two surface entries and a verb whose whole content is what it does
+# NOT do. The lines that would have to go to fit 6600 are the three an agent
+# gets wrong on its own, every time. First, that DELETE on a conversation
+# hides it for the caller and deletes nothing — an agent that reads only
+# "DELETE leaves the conversation" writes the row deletion it was reaching
+# for, which takes the read markers, a direct thread's identity and the other
+# party's history with it. Second, that an AUTHORED message resurfaces the
+# thread and a SYSTEM line resurfaces nobody: without that clause the
+# departure line puts the thread straight back in the leaver's inbox with
+# their own goodbye on it. Third, that the inbox rule is one function
+# (`inbox_of`) the list, the badge and the unread chip all read — a filter on
+# `participants__user` alone shows threads the caller left, and split across
+# two filter() calls it matches "is you" against "has not left" on different
+# rows, which is every thread with two people in it.
+# Trim before raising it again.
+LLMS_BUDGET ?= 7000
 
 .PHONY: contract contract-check
 

@@ -571,7 +571,7 @@ the support lifecycle are not socket work:
 
 ```
 GET|POST   /chat/api/v1/conversations           ?search=… &unread=true
-GET        /chat/api/v1/conversations/{id}
+GET|DELETE /chat/api/v1/conversations/{id}
 GET|POST   /chat/api/v1/conversations/{id}/messages
 PATCH|DELETE /chat/api/v1/conversations/{id}/messages/{message_id}
 POST       /chat/api/v1/conversations/{id}/read        {upto_seq, delivered_upto_seq?}
@@ -580,9 +580,50 @@ GET        /chat/api/v1/support/queue
 POST       /chat/api/v1/support/conversations/{id}/{assign,resolve,reopen}
 ```
 
-`DELETE` answers **200 with the stripped message**, not 204 — the caller is
-handed the exact row shape that says "this id is now empty", which is what a
-local cache purges against.
+`DELETE` on a **message** answers **200 with the stripped message**, not 204 —
+the caller is handed the exact row shape that says "this id is now empty",
+which is what a local cache purges against.
+
+#### Leaving a conversation — `DELETE /conversations/{id}` (0.8.5)
+
+`DELETE` on a **conversation** is the caller leaving it, and answers `204`.
+It is not a delete, and the distinction is the whole design:
+
+| | the leaver | everybody else |
+|---|---|---|
+| the thread on the list | gone (and out of `?unread=true` and `?search=`) | unchanged |
+| the messages | still reachable by id — hidden, not erased | untouched |
+| the participant row | stamped `left_at`, kept | untouched |
+| the live subscription | revoked; presence stops being announced into it | unchanged |
+
+The thread is **hidden, not destroyed**. In a marketplace thread the messages
+are the record of a deal between two people, and one of them tidying their
+inbox is not the other's consent to destroy it. The participant row has to
+stay for a second reason: it carries the read markers, and it is what a direct
+thread's uniqueness is built on.
+
+A `system` line records the departure in the thread —
+`chat.participant.left:<user_id>`, machine vocabulary like every other marker
+here, drawn by `STAPEL_CHAT["SYSTEM_LINE_LABELS"]`. Its durable half is
+`participants[].left_at` on every conversation response, so a client that was
+away when the line was posted reads the state instead of replaying history.
+
+**A new message brings it back.** Any *authored* message clears the marker for
+everyone in the thread: nobody can be talked to in a thread they cannot see,
+so a new line resurfaces it rather than being delivered into a closed room. A
+**system** line resurfaces nobody — including the departure line, which would
+otherwise put the thread back in the leaver's inbox with their own goodbye
+drawn on the row. Read markers are never touched: a thread that comes back
+comes back with the badge it had.
+
+`DELETE` is idempotent (a second call is another `204` and writes no second
+line). A caller who is not a party gets `403 error.403.chat_not_participant` —
+the same answer `GET` on that URL gives them.
+
+**Staff erasure is not on this surface.** User data has one deletion path in
+this fleet — `user.deleted` into `ChatGDPRProvider`, which anonymizes authored
+messages into tombstones and publishes the erasure — and a second door onto
+the same rows is a second door to get wrong.
 
 #### Finding one conversation — `?search=` and `?unread=true` (0.8.2)
 

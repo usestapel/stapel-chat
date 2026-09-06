@@ -282,6 +282,12 @@ def announce(user_id, *, online: bool, last_seen_at=None, online_until=None) -> 
     is no per-recipient filter to apply at delivery: the choice is between
     telling the guest and not sending it. The account on the other side keeps
     presence over REST, where the reader is known.
+
+    A thread this user has **left** is skipped for the same reason and by the
+    same mechanism: their subscription to it was revoked when they left, and
+    announcing "here" into a conversation they no longer have open would keep
+    a green dot alive on somebody else's screen for a person who is not in
+    the room.
     """
     from .conf import chat_settings
     from .models import ConversationParticipant
@@ -291,7 +297,9 @@ def announce(user_id, *, online: bool, last_seen_at=None, online_until=None) -> 
     if not limit:
         return 0
     conversation_ids = list(
-        ConversationParticipant.objects.filter(user_id=user_id)
+        ConversationParticipant.objects.filter(
+            user_id=user_id, left_at__isnull=True
+        )
         .order_by("-conversation__updated_at")
         .values_list("conversation_id", flat=True)[:limit]
     )

@@ -183,6 +183,10 @@ DEFAULTS = {
     # so it ships none: an unlabelled marker gives `last_message.body_preview`
     # null (the row draws its own phrase off `kind`) and is matched by no
     # search, because a row must never be findable by text nobody can see. A
+    # The markers this module itself posts are `chat.support.assigned`,
+    # `chat.support.resolved`, `chat.support.reopened` and
+    # `chat.participant.left:<user_id>` — a deployment that wants any of them
+    # drawn names it here. A
     # deployment that DOES name a label gets both halves at once — the label is
     # what the row draws AND what the search matches, one rule
     # (services.drawn_last_line). A marker may carry an argument after a colon;

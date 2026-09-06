@@ -318,6 +318,7 @@ def conversation_to_dto(
                 online_until=(presence.get(str(p.user_id)) or {}).get(
                     "online_until"
                 ),
+                left_at=p.left_at,
             )
             for p in conv.participants.all()
         ],
@@ -435,12 +436,13 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
         responses={200: ConversationResponseSerializer(many=True)},
     )
     def get(self, request):  # noqa: R007
-        qs = (
-            _scoped(request)
-            .filter(participants__user=request.user)
-            .distinct()
-            .prefetch_related("participants")
-        )
+        # Whose list this is — a party to the thread who has not left it. The
+        # rule lives in the service (`services.inbox_of`) because the badge,
+        # the `unread=true` chip and this list must never disagree about which
+        # threads are on it.
+        qs = services.inbox_of(
+            _scoped(request), viewer=request.user
+        ).prefetch_related("participants")
         # The unread count for the WHOLE page in two subqueries, which is also
         # what `unread=true` filters on — one rule, so the filter and the badge
         # can never disagree.
@@ -566,7 +568,19 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
 
 @extend_schema(tags=["Chat"])
 class ConversationDetailView(SerializerSeamMixin, APIView):
-    """Retrieve a single conversation (participant-only)."""
+    """Retrieve a single conversation, or LEAVE it (participant-only).
+
+    ``DELETE`` is the caller leaving — never a hard delete of the thread. It
+    answered ``405`` until 0.8.5, so a person had no way out of a
+    conversation at all and a test fixture had no way to clean one up. What
+    it does and does not touch is stated once, in
+    :func:`stapel_chat.services.leave_conversation`; the short version is
+    that it hides the thread from the caller and takes nothing away from
+    anybody else. Staff erasure is not on this surface: user data has one
+    deletion path in this fleet (``user.deleted`` →
+    :class:`~stapel_chat.gdpr.ChatGDPRProvider`), and a second door onto the
+    same rows is a second door to get wrong.
+    """
 
     permission_classes = [permissions.IsAuthenticated]
     response_serializer_class = ConversationResponseSerializer
@@ -591,6 +605,26 @@ class ConversationDetailView(SerializerSeamMixin, APIView):
                 )
             )
         )
+
+    @extend_schema(request=None, responses={204: None})
+    def delete(self, request, conversation_id):  # noqa: R007
+        """Leave the conversation. ``204``, and ``204`` again on a retry.
+
+        Idempotent on purpose: a client that lost the response and retried,
+        and a client leaving a thread it already left, are the same request
+        and get the same answer. A second call posts no second system line —
+        the service returns False and writes nothing.
+
+        A caller who is not a party gets ``403`` with the module's one
+        membership key, the same answer ``GET`` on this exact URL gives them.
+        """
+        conv = _get_conversation(request, conversation_id)
+        if conv is None:
+            return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
+        if _my_participant(conv, request.user) is None:
+            return StapelErrorResponse(403, ERR_403_NOT_PARTICIPANT)
+        services.leave_conversation(conversation=conv, user=request.user)
+        return StapelResponse(status=status.HTTP_204_NO_CONTENT)
 
 
 @extend_schema(tags=["Chat"])

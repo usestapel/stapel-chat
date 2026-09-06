@@ -128,7 +128,7 @@
     "/chat/api/v1/conversations/{conversation_id}": {
       "get": {
         "operationId": "chat_api_v1_conversations_retrieve",
-        "description": "Retrieve a single conversation (participant-only).\n\n**Permissions:** `IsAuthenticated`",
+        "description": "Retrieve a single conversation, or LEAVE it (participant-only).\n\n``DELETE`` is the caller leaving — never a hard delete of the thread. It\nanswered ``405`` until 0.8.5, so a person had no way out of a\nconversation at all and a test fixture had no way to clean one up. What\nit does and does not touch is stated once, in\n:func:`stapel_chat.services.leave_conversation`; the short version is\nthat it hides the thread from the caller and takes nothing away from\nanybody else. Staff erasure is not on this surface: user data has one\ndeletion path in this fleet (``user.deleted`` →\n:class:`~stapel_chat.gdpr.ChatGDPRProvider`), and a second door onto the\nsame rows is a second door to get wrong.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
             "in": "path",
@@ -158,6 +158,34 @@
               }
             },
             "description": ""
+          }
+        }
+      },
+      "delete": {
+        "operationId": "chat_api_v1_conversations_destroy",
+        "description": "Leave the conversation. ``204``, and ``204`` again on a retry.\n\nIdempotent on purpose: a client that lost the response and retried,\nand a client leaving a thread it already left, are the same request\nand get the same answer. A second call posts no second system line —\nthe service returns False and writes nothing.\n\nA caller who is not a party gets ``403`` with the module's one\nmembership key, the same answer ``GET`` on this exact URL gives them.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No response body"
           }
         }
       }
@@ -1156,6 +1184,12 @@
             "format": "date-time",
             "nullable": true,
             "description": "When this ``online`` stops being believable — the lease"
+          },
+          "left_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When this participant LEFT the thread, or ``null`` while"
           }
         },
         "required": [

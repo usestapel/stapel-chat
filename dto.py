@@ -35,6 +35,15 @@ class ParticipantResponse:
             event at all — the server heals on its own clock, and a client
             that cannot see the deadline never learns. ``null`` when this
             deployment has never seen them connect.
+        left_at: When this participant LEFT the thread, or ``null`` while
+            they are still in it. The durable half of the
+            ``chat.participant.left`` system line — the same discipline the
+            read markers follow, so a client that was not there when the line
+            was posted reads the state instead of replaying history. Leaving
+            hides the thread for the leaver and takes nothing away from
+            anybody else, and the marker clears again the moment anyone
+            writes (:func:`stapel_chat.services.leave_conversation`), so a UI
+            renders it as "left", never as "removed".
     """
 
     user_id: str
@@ -44,6 +53,7 @@ class ParticipantResponse:
     online: bool = False
     last_seen_at: Optional[datetime] = None
     online_until: Optional[datetime] = None
+    left_at: Optional[datetime] = None
 
 
 @dataclass
