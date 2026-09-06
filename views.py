@@ -82,6 +82,7 @@ __all__ = [
     "SerializerSeamMixin",
     "ConversationListCreateView",
     "ConversationDetailView",
+    "RejoinConversationView",
     "MessageListCreateView",
     "MessageDetailView",
     "MarkReadView",
@@ -110,6 +111,22 @@ class MessageHistoryPagination(AnchorPagination):
 
 
 class ConversationListPagination(UpdatedAtAnchorPagination):
+    page_size = 50
+    max_page_size = 200
+
+
+class LeftConversationListPagination(AnchorPagination):
+    """``?left=true`` anchored on WHEN THE CALLER LEFT, newest departure first.
+
+    A different anchor field from the default list, and deliberately so: the
+    one thing a person scanning threads they walked out of is looking for is
+    the one they walked out of last. ``viewer_left_at`` is the caller's own
+    stamp, annotated per page by :func:`services.left_of`, never the joined
+    participant column — see the note there.
+    """
+
+    anchor_field = "viewer_left_at"
+    ordering = "-viewer_left_at"
     page_size = 50
     max_page_size = 200
 
@@ -322,6 +339,11 @@ def conversation_to_dto(
             )
             for p in conv.participants.all()
         ],
+        # The caller's own departure, lifted out of `participants` because it
+        # is what the ROW is rendered from — read off the participant row, not
+        # off `viewer_left_at`, so a detail read and every listing answer with
+        # the same field rather than the `?left=true` page alone.
+        left_at=viewer_participant.left_at if viewer_participant is not None else None,
     )
 
 
@@ -432,6 +454,25 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
                     "`search` (both narrow, then the page is taken)."
                 ),
             ),
+            OpenApiParameter(
+                name="left",
+                type=bool,
+                location=OpenApiParameter.QUERY,
+                description=(
+                    "`true` returns ONLY the threads the caller has LEFT — the "
+                    "exact complement of the default list, never a widening of "
+                    "it, so a thread is on one of the two and never on both. "
+                    "It exists because leaving destroys nothing: without a "
+                    "listing that shows them, a thread left by mistake is "
+                    "reachable only by a URL somebody kept. Ordered by WHEN "
+                    "THE CALLER LEFT, newest departure first — so `anchor` is "
+                    "that timestamp on this list, not `updated_at` — and every "
+                    "row carries it as `left_at`. `search` and `unread` "
+                    "compose exactly as they do on the default list. Any other "
+                    "value is the default list, unchanged. `POST "
+                    "/conversations/{id}/rejoin` is the way back."
+                ),
+            ),
         ],
         responses={200: ConversationResponseSerializer(many=True)},
     )
@@ -439,9 +480,14 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
         # Whose list this is — a party to the thread who has not left it. The
         # rule lives in the service (`services.inbox_of`) because the badge,
         # the `unread=true` chip and this list must never disagree about which
-        # threads are on it.
-        qs = services.inbox_of(
-            _scoped(request), viewer=request.user
+        # threads are on it. `?left=true` asks for its exact complement
+        # (`services.left_of`), which is the only listing a left thread is on.
+        left_only = _flag(request, "left")
+        base = _scoped(request)
+        qs = (
+            services.left_of(base, viewer=request.user)
+            if left_only
+            else services.inbox_of(base, viewer=request.user)
         ).prefetch_related("participants")
         # The unread count for the WHOLE page in two subqueries, which is also
         # what `unread=true` filters on — one rule, so the filter and the badge
@@ -457,7 +503,13 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
             search=request.query_params.get("search") or "",
             unread_only=_flag(request, "unread"),
         )
-        paginator = self.pagination_class()
+        # Same paging primitive, a different anchor: a left list is walked by
+        # the departure, an inbox by the thread's own last activity.
+        paginator = (
+            LeftConversationListPagination()
+            if left_only
+            else self.pagination_class()
+        )
         page = paginator.paginate_queryset(qs, request)
         # ONE card call per subject type for the whole page. Resolving per
         # conversation would make a fifty-row inbox fifty round trips, which
@@ -576,7 +628,10 @@ class ConversationDetailView(SerializerSeamMixin, APIView):
     it does and does not touch is stated once, in
     :func:`stapel_chat.services.leave_conversation`; the short version is
     that it hides the thread from the caller and takes nothing away from
-    anybody else. Staff erasure is not on this surface: user data has one
+    anybody else. Since 0.8.6 it is undoable: the hidden thread is listed by
+    ``GET /conversations?left=true`` and put back by
+    :class:`RejoinConversationView`. Staff erasure is not on this surface:
+    user data has one
     deletion path in this fleet (``user.deleted`` →
     :class:`~stapel_chat.gdpr.ChatGDPRProvider`), and a second door onto the
     same rows is a second door to get wrong.
@@ -624,6 +679,43 @@ class ConversationDetailView(SerializerSeamMixin, APIView):
         if _my_participant(conv, request.user) is None:
             return StapelErrorResponse(403, ERR_403_NOT_PARTICIPANT)
         services.leave_conversation(conversation=conv, user=request.user)
+        return StapelResponse(status=status.HTTP_204_NO_CONTENT)
+
+
+@extend_schema(tags=["Chat"])
+class RejoinConversationView(SerializerSeamMixin, APIView):
+    """Take back a departure — ``POST /conversations/{id}/rejoin`` -> ``204``.
+
+    The way back from ``DELETE`` on the same thread, and the reason
+    ``?left=true`` exists at all: leaving destroys nothing, so a person who
+    pressed it by mistake needs a listing that shows the thread and a control
+    that undoes it, or the thread is reachable only by a URL they kept.
+
+    A verb beside ``read`` rather than a ``PATCH`` on the conversation: this
+    module spells its state transitions as named POSTs (``read``,
+    ``activity``, ``assign``, ``resolve``, ``reopen``), and a ``PATCH`` with a
+    ``left_at: null`` body would invite a caller to send some other instant —
+    a field whose only legal value is the one the server writes is not a field.
+
+    ``204``, and ``204`` again on a retry: a client that lost the response and
+    a client rejoining a thread it is already in are the same request. The
+    thread comes back with the badge it had and where the departure left it —
+    :func:`services.rejoin_conversation` touches the read markers and the
+    conversation's ``updated_at`` not at all. A caller who is not a party gets
+    ``403`` with the module's one membership key: this is an undo, never a way
+    into a conversation nobody put you in.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=None, responses={204: None})
+    def post(self, request, conversation_id):  # noqa: R007
+        conv = _get_conversation(request, conversation_id)
+        if conv is None:
+            return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
+        if _my_participant(conv, request.user) is None:
+            return StapelErrorResponse(403, ERR_403_NOT_PARTICIPANT)
+        services.rejoin_conversation(conversation=conv, user=request.user)
         return StapelResponse(status=status.HTTP_204_NO_CONTENT)
 
 

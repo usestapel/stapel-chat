@@ -16,6 +16,7 @@ from .views import (
     MarkReadView,
     MessageDetailView,
     MessageListCreateView,
+    RejoinConversationView,
     SupportAssignView,
     SupportQueueView,
     SupportReopenView,
@@ -47,6 +48,11 @@ urlpatterns = [
         "conversations/<uuid:conversation_id>/read",
         MarkReadView.as_view(),
         name="chat-conversation-read",
+    ),
+    path(
+        "conversations/<uuid:conversation_id>/rejoin",
+        RejoinConversationView.as_view(),
+        name="chat-conversation-rejoin",
     ),
     path(
         "conversations/<uuid:conversation_id>/activity",

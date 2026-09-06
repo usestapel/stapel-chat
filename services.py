@@ -24,6 +24,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import (
     BigIntegerField,
     Count,
+    DateTimeField,
     Exists,
     IntegerField,
     OuterRef,
@@ -663,6 +664,42 @@ def leave_conversation(*, conversation: Conversation, user) -> bool:
     return True
 
 
+def rejoin_conversation(*, conversation: Conversation, user) -> bool:
+    """``user`` takes back their departure. Returns True if anything changed.
+
+    The way back from :func:`leave_conversation`, and deliberately nothing
+    more than that: the ``left_at`` stamp is cleared and the thread is on this
+    person's list again, in the place the departure left it and with the badge
+    it always had. **The read markers are never read or written here**, because
+    leaving was not reading and coming back is not reading either, and
+    ``updated_at`` is not touched either: coming back is not activity in the
+    thread, so restoring five threads must not shuffle an inbox five times.
+    Everyone else's view of the thread does not move, for the same reason it
+    did not move when they left.
+
+    Idempotent: rejoining a thread the caller is already in changes nothing
+    and returns False. Membership is not created — a caller with no
+    participant row is not a party, and this function is not a way to join a
+    conversation nobody invited you to (the view answers such a caller 403
+    before reaching here).
+
+    **No system line is posted**, and that asymmetry with the departure is the
+    point. A departure is announced because the counterpart is otherwise left
+    facing silence they cannot explain; a return is the leaver undoing their
+    own mistake, and the state a client renders from — ``left_at`` on the
+    participant row — is cleared by this call. The module already clears the
+    same marker silently on any authored message
+    (:func:`_resurface_participants`); a line here and none there would
+    announce one half of one transition and make a client's rendering depend
+    on which path the thread came back by.
+    """
+    return bool(
+        ConversationParticipant.objects.filter(
+            conversation=conversation, user=user, left_at__isnull=False
+        ).update(left_at=None)
+    )
+
+
 def inbox_of(qs, *, viewer):
     """The conversations that belong on ``viewer``'s list.
 
@@ -677,6 +714,40 @@ def inbox_of(qs, *, viewer):
     return qs.filter(
         participants__user=viewer, participants__left_at__isnull=True
     ).distinct()
+
+
+def left_of(qs, *, viewer):
+    """The conversations ``viewer`` LEFT — the exact complement of
+    :func:`inbox_of`, annotated with ``viewer_left_at``.
+
+    The two rules are written as one another's negation on purpose: every
+    thread this person is a party to is on exactly one of the two lists, so a
+    thread can never fall between them and become unreachable. That is the
+    whole reason this exists — leaving hides a thread and destroys nothing,
+    and a hidden thread with no listing that shows it is reachable only by a
+    URL somebody kept.
+
+    The single ``filter()`` matters here for the same reason it matters in
+    :func:`inbox_of`: split in two it would match "somebody is you" against
+    "somebody else has left", which is every thread anybody ever walked out
+    of.
+
+    ``viewer_left_at`` is a subquery, not the joined column: this list is
+    ORDERED by it (most recently left first), and ordering on a multi-valued
+    join orders by whichever participant row the join produced — the
+    counterpart's departure, on a thread both of them left.
+    """
+    filtered = qs.filter(
+        participants__user=viewer, participants__left_at__isnull=False
+    ).distinct()
+    return filtered.annotate(
+        viewer_left_at=Subquery(
+            ConversationParticipant.objects.filter(
+                conversation=OuterRef("pk"), user=viewer
+            ).values("left_at")[:1],
+            output_field=DateTimeField(),
+        )
+    )
 
 
 # ── Editing and deletion ────────────────────────────────────────────────

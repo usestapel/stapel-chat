@@ -296,6 +296,13 @@ class ConversationResponse:
         participants: The conversation's participants.
         created_at: Creation time.
         updated_at: Last-activity time.
+        left_at: When the REQUESTING user left this thread — ``null`` while
+            they are in it. The same instant as their own row in
+            ``participants``, lifted to the top level because it is the one
+            participant field a row's own rendering depends on. ``null`` on
+            every row of the default list (a thread you left is not on it) and
+            never ``null`` on ``?left=true``, which orders by this value,
+            newest departure first.
     """
 
     id: str
@@ -312,6 +319,7 @@ class ConversationResponse:
     subject: Optional[SubjectResponse] = None
     last_message: Optional[LastMessageResponse] = None
     participants: List[ParticipantResponse] = field(default_factory=list)
+    left_at: Optional[datetime] = None
 
 
 # ── Request DTOs ────────────────────────────────────────────────────────

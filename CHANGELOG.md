@@ -4,6 +4,87 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.6] — 2026-09-06
+
+### Added — leaving a conversation is undoable
+
+0.8.5 gave a person a way out of a thread and no way back into it. Every half
+of it was right on its own: the thread is off `inbox_of`, out of the unread
+counts and out of `?search=`, and it is deliberately **not** destroyed — the
+messages are all there and `GET /conversations/{id}` still serves them to the
+person who left. Together those two make a hole: nothing listed a left thread,
+so somebody who pressed «Покинуть диалог» by mistake could reach it only by a
+URL they happened to have kept.
+
+```
+GET  /chat/api/v1/conversations?left=true&limit=20   ->  only the threads you LEFT
+POST /chat/api/v1/conversations/{id}/rejoin          ->  204 No Content
+```
+
+**`?left=true` is the exact complement of the default list, not a widening of
+it.** `services.inbox_of` and the new `services.left_of` are written as one
+another's negation, so every thread a person is party to is on exactly one of
+the two and none can fall between them and become unreachable again. The
+default listing is byte-for-byte what it was: the whole point of leaving is
+that the thread is not on it.
+
+- ordered by **when the caller left**, newest departure first — so `anchor` on
+  this list is a `left_at`, where on the default list it is an `updated_at`;
+- `search`, `unread`, `anchor` / `direction` / `limit` compose exactly as they
+  do on the inbox, over the same `filter_inbox`, so neither list has a second
+  opinion about what a search means;
+- the stamp it orders on is a **subquery**, `viewer_left_at`, not the joined
+  participant column: on a thread both parties walked out of, ordering on the
+  join sorts by whichever departure the join happened to produce. It is one
+  subquery per page, and `TestQueryCount` measures the page at two rows and at
+  six and requires the same number.
+
+Every conversation response now carries **`left_at`** at the top level — the
+requesting user's own departure, the same instant their row in `participants`
+already carried, lifted out because it is what the ROW is rendered from. It is
+`null` on every row of the default list and never `null` on `?left=true`.
+
+**`POST …/rejoin` clears the caller's `left_at`, and that is the entire verb.**
+A named POST beside `read` rather than a `PATCH` clearing a field: this module
+spells its transitions as verbs (`read`, `activity`, `assign`, `resolve`,
+`reopen`), and a body whose only legal value is the one the server writes is
+not a body. What it deliberately does not touch is the whole content of it:
+
+- **read markers** — the thread comes back with the badge it had. Leaving was
+  not reading, and coming back is not reading either;
+- **`updated_at`** — it comes back where the departure left it, not at the top
+  of the inbox. Restoring five threads must not shuffle a person's list five
+  times;
+- **membership** — no participant row is created. A non-party gets `403
+  error.403.chat_not_participant`, the same key `GET` and `DELETE` on that
+  thread give them. This is an undo, never a door into a conversation nobody
+  put you in.
+
+Idempotent: rejoining a thread you are already in is another `204` and writes
+nothing.
+
+**No system line is posted on the way back**, and the asymmetry with the
+departure is deliberate rather than an omission. A departure is announced
+because the counterpart is otherwise left facing silence they cannot explain;
+a return is a person undoing their own mistake, and the state a client renders
+from — `participants[].left_at` — is cleared by the call. This module already
+clears that same marker silently whenever anybody writes an authored message
+(`_resurface_participants`); a line here and none there would announce one half
+of one transition and make a client's rendering depend on which of the two
+paths the thread came back by.
+
+One consequence of the unchanged search rule, worth stating because it looks
+like a bug and is not: a left thread's **last line is the departure marker**,
+and an unlabelled marker draws nothing and is found by nothing
+(`drawn_last_line`, one rule for the preview and the search). So
+`?left=true&search=…`
+finds these rows by the counterpart's name and the subject card's title, not
+by the last thing anyone said in them.
+
+Compatible: a new query parameter that is off unless asked for, a new endpoint,
+and one nullable field added to a response. Nothing that existed answers
+differently.
+
 ## [0.8.5] — 2026-09-06
 
 ### Added — a person can leave a conversation

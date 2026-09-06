@@ -10,7 +10,7 @@
 [![license](https://img.shields.io/github/license/usestapel/stapel-chat)](https://github.com/usestapel/stapel-chat/blob/main/LICENSE)
 [![llms.txt](https://img.shields.io/badge/llms.txt-blue)](https://github.com/usestapel/stapel-chat/blob/main/docs/llms.txt)
 
-> Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; leaving a thread, which hides it for the person who left and takes nothing away from anybody else (their messages, the other party's copy and their own history by id all stay) and un-hides on the next message written there; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).
+> Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; leaving a thread, which hides it for the person who left and takes nothing away from anybody else (their messages, the other party's copy and their own history by id all stay), un-hides on the next message written there, and is undoable (the left threads are listed by ?left=true and put back by POST /conversations/{id}/rejoin, which clears the departure and nothing else); and a support layer (queue, first-come assignment, open/pending/resolved with reopen).
 
 Part of the [Stapel framework](https://github.com/usestapel) — composable Django apps that deploy as a monolith or as microservices without changing module code.
 
@@ -24,11 +24,11 @@ pip install stapel-chat
 
 | Fact | Value |
 |---|---|
-| Version | `0.8.5` |
+| Version | `0.8.6` |
 | Python | `>=3.11` (3.11, 3.12, 3.13, 3.14) |
-| HTTP operations | 14 |
+| HTTP operations | 15 |
 | Config axes | 15 |
-| Usage surface | 32 |
+| Usage surface | 34 |
 | Extension points | 9 |
 | Error codes | 65 |
 | Fleet dependencies | [`stapel-auth`](https://github.com/usestapel/stapel-auth) (optional) · [`stapel-cdn`](https://github.com/usestapel/stapel-cdn) (optional) · [`stapel-core`](https://github.com/usestapel/stapel-core) · [`stapel-realtime`](https://github.com/usestapel/stapel-realtime) |

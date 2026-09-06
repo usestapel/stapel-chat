@@ -35,6 +35,14 @@
             }
           },
           {
+            "in": "query",
+            "name": "left",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "`true` returns ONLY the threads the caller has LEFT — the exact complement of the default list, never a widening of it, so a thread is on one of the two and never on both. It exists because leaving destroys nothing: without a listing that shows them, a thread left by mistake is reachable only by a URL somebody kept. Ordered by WHEN THE CALLER LEFT, newest departure first — so `anchor` is that timestamp on this list, not `updated_at` — and every row carries it as `left_at`. `search` and `unread` compose exactly as they do on the default list. Any other value is the default list, unchanged. `POST /conversations/{id}/rejoin` is the way back."
+          },
+          {
             "name": "limit",
             "required": false,
             "in": "query",
@@ -128,7 +136,7 @@
     "/chat/api/v1/conversations/{conversation_id}": {
       "get": {
         "operationId": "chat_api_v1_conversations_retrieve",
-        "description": "Retrieve a single conversation, or LEAVE it (participant-only).\n\n``DELETE`` is the caller leaving — never a hard delete of the thread. It\nanswered ``405`` until 0.8.5, so a person had no way out of a\nconversation at all and a test fixture had no way to clean one up. What\nit does and does not touch is stated once, in\n:func:`stapel_chat.services.leave_conversation`; the short version is\nthat it hides the thread from the caller and takes nothing away from\nanybody else. Staff erasure is not on this surface: user data has one\ndeletion path in this fleet (``user.deleted`` →\n:class:`~stapel_chat.gdpr.ChatGDPRProvider`), and a second door onto the\nsame rows is a second door to get wrong.\n\n**Permissions:** `IsAuthenticated`",
+        "description": "Retrieve a single conversation, or LEAVE it (participant-only).\n\n``DELETE`` is the caller leaving — never a hard delete of the thread. It\nanswered ``405`` until 0.8.5, so a person had no way out of a\nconversation at all and a test fixture had no way to clean one up. What\nit does and does not touch is stated once, in\n:func:`stapel_chat.services.leave_conversation`; the short version is\nthat it hides the thread from the caller and takes nothing away from\nanybody else. Since 0.8.6 it is undoable: the hidden thread is listed by\n``GET /conversations?left=true`` and put back by\n:class:`RejoinConversationView`. Staff erasure is not on this surface:\nuser data has one\ndeletion path in this fleet (``user.deleted`` →\n:class:`~stapel_chat.gdpr.ChatGDPRProvider`), and a second door onto the\nsame rows is a second door to get wrong.\n\n**Permissions:** `IsAuthenticated`",
         "parameters": [
           {
             "in": "path",
@@ -523,6 +531,36 @@
         }
       }
     },
+    "/chat/api/v1/conversations/{conversation_id}/rejoin": {
+      "post": {
+        "operationId": "chat_api_v1_conversations_rejoin_create",
+        "description": "Take back a departure — ``POST /conversations/{id}/rejoin`` -> ``204``.\n\nThe way back from ``DELETE`` on the same thread, and the reason\n``?left=true`` exists at all: leaving destroys nothing, so a person who\npressed it by mistake needs a listing that shows the thread and a control\nthat undoes it, or the thread is reachable only by a URL they kept.\n\nA verb beside ``read`` rather than a ``PATCH`` on the conversation: this\nmodule spells its state transitions as named POSTs (``read``,\n``activity``, ``assign``, ``resolve``, ``reopen``), and a ``PATCH`` with a\n``left_at: null`` body would invite a caller to send some other instant —\na field whose only legal value is the one the server writes is not a field.\n\n``204``, and ``204`` again on a retry: a client that lost the response and\na client rejoining a thread it is already in are the same request. The\nthread comes back with the badge it had and where the departure left it —\n:func:`services.rejoin_conversation` touches the read markers and the\nconversation's ``updated_at`` not at all. A caller who is not a party gets\n``403`` with the module's one membership key: this is an undo, never a way\ninto a conversation nobody put you in.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No response body"
+          }
+        }
+      }
+    },
     "/chat/api/v1/support/conversations/{conversation_id}/assign": {
       "post": {
         "operationId": "chat_api_v1_support_conversations_assign_create",
@@ -887,6 +925,12 @@
               "$ref": "#/components/schemas/ParticipantResponse"
             },
             "description": "The conversation's participants"
+          },
+          "left_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When the REQUESTING user left this thread — ``null`` while"
           }
         },
         "required": [

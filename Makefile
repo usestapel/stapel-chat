@@ -86,7 +86,21 @@ PYTHON ?= python3
 # two filter() calls it matches "is you" against "has not left" on different
 # rows, which is every thread with two people in it.
 # Trim before raising it again.
-LLMS_BUDGET ?= 7000
+# Raised again in 0.8.6, from 7000, by 400: leaving became UNDOABLE, which is
+# two more surface entries and the half of 0.8.5 that was missing. The lines
+# that would have to go to fit 7000 are the two an agent cannot write correct
+# code without. First, that `left_of` is the exact COMPLEMENT of `inbox_of`
+# and orders on an annotated `viewer_left_at`: an agent that filters
+# `participants__left_at__isnull=False` across two calls lists every thread
+# anybody ever walked out of, and one that orders on the joined column sorts a
+# thread both parties left by whichever departure the join produced. Second,
+# that rejoining clears `left_at` and NOTHING else — an agent that "refreshes"
+# the row by marking it read destroys the badge the leaver is coming back for,
+# and one that stamps `updated_at` shuffles the inbox once per restored
+# thread. Neither entry is decoration: the whole verb is what it does not
+# touch, and that is exactly what a one-line summary drops.
+# Trim before raising it again.
+LLMS_BUDGET ?= 7400
 
 .PHONY: contract contract-check
 

@@ -570,10 +570,11 @@ Everything above also exists over REST, because rehydration, history paging and
 the support lifecycle are not socket work:
 
 ```
-GET|POST   /chat/api/v1/conversations           ?search=… &unread=true
+GET|POST   /chat/api/v1/conversations           ?search=… &unread=true &left=true
 GET|DELETE /chat/api/v1/conversations/{id}
 GET|POST   /chat/api/v1/conversations/{id}/messages
 PATCH|DELETE /chat/api/v1/conversations/{id}/messages/{message_id}
+POST       /chat/api/v1/conversations/{id}/rejoin
 POST       /chat/api/v1/conversations/{id}/read        {upto_seq, delivered_upto_seq?}
 POST       /chat/api/v1/conversations/{id}/activity    {state}
 GET        /chat/api/v1/support/queue
@@ -624,6 +625,64 @@ the same answer `GET` on that URL gives them.
 this fleet — `user.deleted` into `ChatGDPRProvider`, which anonymizes authored
 messages into tombstones and publishes the erasure — and a second door onto
 the same rows is a second door to get wrong.
+
+#### The way back — `?left=true` and `POST /conversations/{id}/rejoin` (0.8.6)
+
+0.8.5 hid a left thread correctly and destroyed nothing, and that combination
+had a hole in it: no listing showed the thread, so a person who pressed
+«Покинуть диалог» by mistake could reach it only by a URL they had kept.
+
+```
+GET  /chat/api/v1/conversations?left=true&limit=20   -> only the threads you LEFT
+POST /chat/api/v1/conversations/{id}/rejoin          -> 204, and it is on your list again
+```
+
+`?left=true` is the **exact complement** of the default list, never a widening
+of it: `services.inbox_of` and `services.left_of` are written as one another's
+negation, so every thread a person is party to is on exactly one of the two
+and none can fall between them. The default list is unchanged — the whole
+point of leaving is that the thread is not on it.
+
+| | default list | `?left=true` |
+|---|---|---|
+| which threads | party, has not left | party, **has** left |
+| ordered by | the thread's `updated_at` | **the caller's `left_at`**, newest departure first |
+| what `anchor` means | an `updated_at` | a `left_at` |
+| `search` / `unread` | as documented below | identical, composed the same way |
+
+Every conversation response now carries **`left_at`** at the top level — the
+requesting user's own departure, the same instant as their row in
+`participants`. It is `null` on every row of the default list and never null
+on `?left=true`, which is the value that list is anchored on.
+
+One consequence of the search rule, unchanged and worth stating: a left
+thread's **last line is the departure marker**, and an unlabelled marker draws
+nothing and is therefore found by nothing (`drawn_last_line`, one rule for the
+preview and the search). So `?left=true&search=…` finds these rows by the
+counterpart's name and by the subject card's title, not by the last thing that
+was said in them.
+
+`POST …/rejoin` is a verb beside `read`, not a `PATCH` clearing a field: this
+module spells its transitions as named POSTs (`read`, `activity`, `assign`,
+`resolve`, `reopen`), and a body whose only legal value is the one the server
+writes is not a body. It answers `204`, and `204` again on a retry.
+
+What it does, in full: it clears the caller's `left_at`. That is the whole
+verb — **read markers are not touched** (the thread comes back with the badge
+it had), `updated_at` is not touched (it comes back where the departure left
+it, so restoring five threads does not shuffle an inbox five times), and no
+participant row is created (`403 error.403.chat_not_participant` for a
+non-party — an undo, never a door into a conversation nobody put you in).
+
+**No system line is posted on the way back**, and the asymmetry with the
+departure is deliberate. A departure is announced because the counterpart is
+otherwise left facing silence they cannot explain; a return is a person
+undoing their own mistake, and the state a client renders from —
+`participants[].left_at` — is cleared by the call. The module already clears
+that same marker silently whenever anyone writes an authored message
+(`_resurface_participants`); a line here and none there would announce one
+half of one transition and make a client's rendering depend on which of the
+two paths the thread came back by.
 
 #### Finding one conversation — `?search=` and `?unread=true` (0.8.2)
 
