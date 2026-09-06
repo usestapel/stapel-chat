@@ -13,6 +13,7 @@ from .dto import (
     ConversationResponse,
     CreateConversationRequest,
     EditMessageRequest,
+    LastMessageResponse,
     MarkReadRequest,
     MessageResponse,
     ParticipantResponse,
@@ -90,6 +91,11 @@ class AttachmentResponseSerializer(StapelDataclassSerializer):
 class MessageResponseSerializer(StapelDataclassSerializer):
     class Meta:
         dataclass = MessageResponse
+
+
+class LastMessageResponseSerializer(StapelDataclassSerializer):
+    class Meta:
+        dataclass = LastMessageResponse
 
 
 class ConversationResponseSerializer(StapelDataclassSerializer):

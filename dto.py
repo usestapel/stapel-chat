@@ -202,6 +202,48 @@ class SubjectResponse:
 
 
 @dataclass
+class LastMessageResponse:
+    """The one line an inbox row draws under the title.
+
+    A projection, not a message: enough to PAINT the row, and deliberately not
+    enough to stand in for the thread (no id, no attachments, no revision
+    cursor — a client that wants those opens the conversation). It is annotated
+    for a whole page in the same query the list already costs, because the
+    alternative a client is otherwise driven to — ``GET /messages?limit=1`` per
+    row — is fifty requests for a fifty-row inbox.
+
+    Attributes:
+        seq: That message's position in the thread — the newest one in it.
+            Carried so a client can tell whether the line it holds is still
+            the row's current one. (It is NOT always equal to the
+            conversation's ``last_seq``: that counter is shared with the
+            revision journal and runs ahead of every ``seq`` as soon as
+            anything in the thread is edited or deleted.)
+        kind: ``text`` or ``system``.
+        sender_id: Author's user id, or null for a system line.
+        created_at: When it was posted — what the row timestamps.
+        body_preview: The text the row DRAWS for that line, or ``null``.
+            Plain, single-line, at most 140 characters. Null in exactly three
+            cases — the same three the conversation-list search excludes, from
+            the same rule (``services.drawn_last_line``): a TOMBSTONE (the row
+            draws "deleted", never the body that was withdrawn), a message
+            with no body at all (attachment-only), and a SYSTEM line whose
+            marker this deployment gave no words
+            (``STAPEL_CHAT['SYSTEM_LINE_LABELS']``) — a marker like
+            ``video.call.ended:188`` is machine vocabulary, and printing it at
+            a reader is worse than printing nothing. ``kind`` says which case
+            it is, so a client renders its own phrase rather than guessing.
+            ``last_message`` itself is null only for a thread with no messages.
+    """
+
+    seq: int
+    kind: str
+    created_at: datetime
+    sender_id: Optional[str] = None
+    body_preview: Optional[str] = None
+
+
+@dataclass
 class ConversationResponse:
     """A conversation (thread).
 
@@ -226,6 +268,10 @@ class ConversationResponse:
             or ``null`` for a thread about nothing in particular, which is
             every thread a generic chat opens. Resolved in ONE batched call
             per subject type for a whole page, never one per conversation.
+        last_message: The line this row draws under the title, or ``null``.
+            See :class:`LastMessageResponse`; ``null`` means a thread nobody
+            has written in yet. Annotated for a whole page inside the list's
+            own query — a row is never worth a request of its own.
         participants: The conversation's participants.
         created_at: Creation time.
         updated_at: Last-activity time.
@@ -243,6 +289,7 @@ class ConversationResponse:
     socket_path: str = ""
     assigned_operator_id: Optional[str] = None
     subject: Optional[SubjectResponse] = None
+    last_message: Optional[LastMessageResponse] = None
     participants: List[ParticipantResponse] = field(default_factory=list)
 
 

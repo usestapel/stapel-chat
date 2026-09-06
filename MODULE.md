@@ -599,7 +599,7 @@ draws**, and nothing else:
 |---|---|
 | the counterpart's **display name** | the user-model paths `STAPEL_CHAT["SEARCH_NAME_FIELDS"]` names (`username`, `first_name`, `last_name` out of the box — swap them where a host's display name comes from somewhere else). Your own name is not one of them: the row says who it is *with*. |
 | the **subject card's title** | the card the subject type's `card_function` resolves, read at the fields that type's `search_fields` policy names (`title` by default). This is the one place anything reads inside a card, and the host says where. |
-| the **last message's body** | the row at `Conversation.last_seq`. A tombstone and a system line are never matched — a deleted message renders as deleted and a system line is machine vocabulary (`video.call.ended:188`), so neither is text a reader can see. An *older* message is not matched either: it is not on the row. |
+| the **last message's body** | the thread's newest message — and specifically the text that row *draws* for it, which since 0.8.3 is the same `last_message.body_preview` the row ships (`services.drawn_last_line`, one rule for both). A tombstone is never matched (it draws as deleted), and neither is a system marker unless this deployment gave it words in `SYSTEM_LINE_LABELS` — then the row draws the label and those words find it. An *older* message is not matched either: it is not on the row. |
 
 `unread=true` keeps the conversations whose `unread_count` is above zero for
 the caller — the same subquery the count itself comes from, so the chip and the
@@ -618,6 +618,54 @@ subject threads (500; `0` turns it off) — one batched call per subject type,
 reused by the page that is about to render, never one call per row. Past that
 bound a thread is still found by name and by its last line, and the truncation
 is logged rather than looking like an empty catalogue.
+
+#### The line a row draws — `last_message` (0.8.3)
+
+Every conversation on the list (and on a single read) carries the line the row
+paints under its title:
+
+```json
+"last_message": {
+  "seq": 42, "kind": "text",
+  "sender_id": "…", "created_at": "…",
+  "body_preview": "Is the bicycle still there?"
+}
+```
+
+A projection, not a message: no id, no attachments, no `rev_seq`. A client that
+wants those opens the thread. `null` means nobody has written in the thread
+yet.
+
+**`body_preview` is what the row DRAWS** — plain, one line, at most 140
+characters — and it is `null` in exactly the three cases the search excludes,
+because both read one function (`services.drawn_last_line`):
+
+- a **tombstone** (the row draws "deleted", never the withdrawn body),
+- a message with **no body** at all (attachment-only),
+- a **system line** whose marker this deployment gave no words. A marker is
+  machine vocabulary (`video.call.ended:188`) and this module owns it in no
+  language, so `STAPEL_CHAT["SYSTEM_LINE_LABELS"]` is empty out of the box:
+  `{"video.call.ended": "Call ended"}` makes that row draw *Call ended* **and**
+  makes "call ended" find it, in one move. `kind` says which case a `null` is,
+  so a client can render its own phrase instead of guessing.
+
+The last line is the thread's **newest message by `seq`** — never the row at
+`Conversation.last_seq`, which is the trap: that counter is shared with the
+revision journal, so it runs ahead of every `seq` the moment anything in the
+thread is edited or deleted. (0.8.2's search had exactly that bug: a thread
+where anyone had edited or deleted anything quietly stopped being findable by
+its own last line.)
+
+The whole page is annotated in the SELECT the list already runs
+(`services.with_last_message`) — six correlated subqueries however many rows,
+the same budget the unread count has, and `tests/test_inbox_search.py`
+measures the page against its own pre-projection cost so a per-row read cannot
+creep back in. `GET /messages?limit=1` per row is not an answer: it is fifty
+requests for a fifty-row inbox. A caller holding a single unannotated
+conversation pays one query (`services.last_message_of`).
+
+Live updates need none of this: the inbox signal has always carried the whole
+message (`chat.inbox`). What was missing was the FIRST paint.
 
 ### Host ASGI assembly (`routing.py`)
 

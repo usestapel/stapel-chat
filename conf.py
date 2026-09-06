@@ -56,6 +56,11 @@ CTO-facing config axes (capability-config.md §16):
   about. The first names the user-model fields a display name is made of (the
   default is what ``stapel_core``'s user profile presenter renders); the
   second bounds how many subject cards one search may resolve.
+- ``SYSTEM_LINE_LABELS`` — the words a system marker draws as on a
+  conversation-list row (``last_message.body_preview``), and therefore also
+  the words that find it. Empty by default: the marker is the host's to
+  render, and an unlabelled one is drawn by nobody and found by nobody rather
+  than printing ``video.call.ended:188`` at a reader.
 - ``BLOCK_ENFORCEMENT`` / ``BLOCK_FUNCTION`` — whether a blocked party may
   OPEN a direct thread with the other party or send into one, and who is
   asked. See ``blocks.py``: a provider that is present and failing is a 503,
@@ -171,6 +176,19 @@ DEFAULTS = {
     # 0 turns title matching off entirely (a deployment whose provider is slow,
     # or that has no subjects, pays nothing).
     "SEARCH_SUBJECT_SCAN": 500,
+    # The words a SYSTEM marker draws as on a conversation-list row — an OPEN
+    # dict axis, marker -> short label, EMPTY out of the box. A system line's
+    # body is machine vocabulary the host renders ("chat.support.resolved",
+    # "video.call.ended:188"), and this module owns those words in no language,
+    # so it ships none: an unlabelled marker gives `last_message.body_preview`
+    # null (the row draws its own phrase off `kind`) and is matched by no
+    # search, because a row must never be findable by text nobody can see. A
+    # deployment that DOES name a label gets both halves at once — the label is
+    # what the row draws AND what the search matches, one rule
+    # (services.drawn_last_line). A marker may carry an argument after a colon;
+    # the label is looked up on the exact body, then on the part before the
+    # colon, and is static text (the argument is never interpolated).
+    "SYSTEM_LINE_LABELS": {},
     # Whether a block stops opening a NEW direct thread and sending into one.
     # It never stops `create_direct` from RETURNING a thread that already
     # exists: that is a read of history, and this fleet's blocks do not

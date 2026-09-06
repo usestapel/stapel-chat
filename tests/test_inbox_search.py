@@ -297,7 +297,7 @@ class TestQueryCount:
     """
 
     @staticmethod
-    def _measure(auth_client, user, params, rows, tag):
+    def _measure(auth_client, user, params, rows, tag, previews=True):
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
 
@@ -312,7 +312,15 @@ class TestQueryCount:
         with CaptureQueriesContext(connection) as ctx:
             response = auth_client.get(LIST, params)
         assert response.status_code == 200
-        assert len(response.json()["items"]) == rows
+        items = response.json()["items"]
+        assert len(items) == rows
+        if previews:
+            # A page whose rows came back empty would hold the query count
+            # flat by measuring nothing. Every row here draws its last line.
+            assert all(
+                row["last_message"]["body_preview"] == "about the marta thing"
+                for row in items
+            )
         return len(ctx.captured_queries)
 
     @pytest.mark.parametrize(
@@ -328,6 +336,28 @@ class TestQueryCount:
         Conversation.objects.all().delete()
         large = self._measure(auth_client, user, params, 6, "b")
         assert small == large
+
+    def test_the_last_message_projection_costs_no_query_at_all(
+        self, auth_client, user, monkeypatch
+    ):
+        """The 0.8.3 projection rides in the SELECT the list already runs.
+
+        Measured against the page as it was WITHOUT it — annotation off and the
+        DTO field off, which is the 0.8.2 shape — because "the count did not
+        grow with the row count" would also hold for a projection that cost one
+        extra query flat, and one extra query per page is still a client's
+        first request for a preview it should have been handed.
+        """
+        import stapel_chat.views as views
+
+        monkeypatch.setattr(views.services, "with_last_message", lambda qs: qs)
+        monkeypatch.setattr(views, "last_message_to_dto", lambda conv: None)
+        before = self._measure(auth_client, user, {}, 4, "c", previews=False)
+
+        monkeypatch.undo()
+        Conversation.objects.all().delete()
+        after = self._measure(auth_client, user, {}, 4, "d")
+        assert after == before
 
     def test_one_card_call_for_a_whole_search(self, auth_client, user):
         """The search resolves cards to match titles; the page then renders

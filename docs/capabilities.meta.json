@@ -126,6 +126,35 @@
         "stapel_chat.services.unread_count"
       ]
     },
+    "with_last_message": {
+      "kind": "factory",
+      "intent": "Annotate the line every inbox row draws — the newest message's seq, kind, author, time and body — onto a whole PAGE, inside the SELECT the list already runs. The alternative a client is driven to is GET /messages?limit=1 per row: fifty requests for a fifty-row inbox.",
+      "instead_of": [
+        "stapel_chat.services.last_message_of"
+      ]
+    },
+    "last_message_of": {
+      "kind": "factory",
+      "intent": "The one message an inbox row would draw, for a caller holding a single conversation — newest by seq. Filtering on Conversation.last_seq finds NOTHING once anything in the thread was edited or deleted: that counter is shared with the revision journal.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.filter"
+      ]
+    },
+    "drawn_last_line": {
+      "kind": "gate_function",
+      "intent": "THE text a conversation-list row draws for its last line, or None — one rule for the preview a row ships AND for what ?search= matches on that line. A tombstone, a body-less message and an unlabelled system marker draw nothing. A second copy of it is how a search finds rows whose preview says something else.",
+      "instead_of": [
+        "stapel_chat.models.Message.body"
+      ]
+    },
+    "preview_of": {
+      "kind": "factory",
+      "intent": "A body as ONE plain line of at most 140 characters — what a row has space for. The whole body is paid for by every row on every page load and rendered by none of them."
+    },
+    "system_line_label": {
+      "kind": "factory",
+      "intent": "The words this deployment gave a system marker (SYSTEM_LINE_LABELS), or None. Printing chat.support.resolved or video.call.ended:188 at a reader is what this prevents; an unlabelled marker draws nothing and is found by nothing."
+    },
     "filter_inbox": {
       "kind": "factory",
       "intent": "The inbox's two filters — a search over the three things a row DRAWS (counterpart name, subject card title, last line) and unread-only — applied before the anchor page is taken. A body icontains instead finds rows by text nobody can see and misses the two fields that are not in this database.",

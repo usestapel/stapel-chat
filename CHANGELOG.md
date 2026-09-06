@@ -4,6 +4,86 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] — 2026-09-06
+
+### Added — a conversation-list row carries the line it draws
+
+`ConversationResponse` carried `last_seq`, `unread_count` and `updated_at` and
+no message, so a thread list could say a row had moved but not what it said.
+A client had two options and both are defects: draw an empty row, or spend a
+request per row (`GET /messages?limit=1`, fifty of them for a fifty-row inbox)
+filling it in. Every row now ships the line it paints:
+
+```json
+"last_message": {
+  "seq": 42, "kind": "text",
+  "sender_id": "…", "created_at": "…",
+  "body_preview": "Is the bicycle still there?"
+}
+```
+
+It is a **projection, not a message** — no id, no attachments, no `rev_seq`. A
+client that wants those opens the thread. `null` means nobody has written in
+the thread yet.
+
+**`body_preview` is what the row DRAWS**, plain, one line, at most 140
+characters — and `null` in exactly the three cases 0.8.2's search already
+excluded, because both now read ONE function
+(`services.drawn_last_line`): a tombstone (the row draws "deleted", never the
+withdrawn body), a message with no body at all (attachment-only), and a system
+line whose marker this deployment gave no words. Two rules would have meant
+rows found by a word their own preview does not contain — the same defect
+0.8.2's search rule exists to prevent, arriving from the other side.
+
+A system marker is machine vocabulary (`video.call.ended:188`) and this module
+owns it in no language, so the new `SYSTEM_LINE_LABELS` registry is **empty out
+of the box**: an unlabelled marker draws nothing (`kind` says which case a
+`null` is, so a client renders its own phrase) and is found by nothing.
+`{"video.call.ended": "Call ended"}` makes that row draw *Call ended* **and**
+makes "call ended" find it, in one move — because it is one rule.
+
+### Fixed — a thread that was ever edited had no last line
+
+0.8.2 matched the last message as the row at `seq == Conversation.last_seq`.
+That counter is **shared with the revision journal** (`_allocate_seq` hands out
+one sequence for both roles), so it runs ahead of every `seq` in the thread the
+moment anything is edited or deleted — and the match silently found nothing.
+A thread quietly stopped being findable by its own last line as soon as anybody
+edited a message in it: the threads people use most, failing first, with no
+error anywhere. The last line is the thread's **newest message by `seq`**, in
+both the search and the new projection.
+
+### Performance
+
+The whole page is annotated in the SELECT the list already runs
+(`services.with_last_message`): six correlated subqueries however many rows,
+the same budget `with_viewer_unread` set in 0.8.2. `tests/test_inbox_search.py`
+now measures the page against its own **pre-projection** cost, not just at two
+sizes — "it did not grow with the row count" also holds for a projection that
+costs one flat extra query, and one extra query per page is still the request
+a client should never have had to make. A caller holding a single unannotated
+conversation pays one query (`services.last_message_of`); the detail read
+annotates instead and pays none.
+
+Live updates needed nothing: `chat.inbox` has always carried the whole message.
+What was missing was the first paint.
+
+### Notes
+
+- New config: `SYSTEM_LINE_LABELS` (wiring, like the `SEARCH_*` pair — not a
+  CTO-facing axis). New surface: `with_last_message`, `last_message_of`,
+  `drawn_last_line`, `preview_of`, `system_line_label`.
+- `llms.txt` budget raised 6200 → 6600, with the argument in the Makefile.
+- The `sender_id` in the projection carries the user model's own primary-key
+  field as its output field: a bare subquery over an FK column hands back
+  whatever the driver stored (SQLite: a UUID with its dashes rubbed out), and
+  an id a client cannot match against the participant list on the same row is
+  worse than no id.
+- Patch, not minor: additive. The one behavior change is the fix above, and it
+  only ever turns a wrong empty answer into the right one — unless a
+  deployment sets `SYSTEM_LINE_LABELS`, which is opt-in and widens the search
+  to exactly the words it just chose to show.
+
 ## [0.8.2] — 2026-09-06
 
 ### Added — the conversation list can be searched and narrowed to unread

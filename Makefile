@@ -59,7 +59,18 @@ PYTHON ?= python3
 # that are not in this database at all. The surface entry it costs is the one
 # that keeps a fifty-row inbox from costing fifty unread counts.
 # Trim before raising it again.
-LLMS_BUDGET ?= 6200
+# Raised again in 0.8.3, from 6200, by 400: a conversation-list row now carries
+# the LINE IT DRAWS (`last_message`), and the lines that cannot be cut are the
+# two an agent gets wrong on its own. First, that the preview and `?search=`
+# read ONE rule (`drawn_last_line`) — an agent that writes its own truncation
+# ships rows found by words their preview does not contain. Second, that the
+# last line is the newest message BY SEQ and never `Conversation.last_seq`:
+# that counter doubles as the revision journal, so an agent anchoring on it
+# writes code that goes blank for every thread anybody ever edited. The five
+# surface entries this costs are the rule, the page annotation, its per-row
+# fallback, the truncation and the system-marker label lookup.
+# Trim before raising it again.
+LLMS_BUDGET ?= 6600
 
 .PHONY: contract contract-check
 

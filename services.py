@@ -842,6 +842,174 @@ def with_viewer_unread(qs, *, viewer):
     )
 
 
+# ── The last line an inbox row draws ─────────────────────────────────────
+
+#: Most characters an inbox preview carries. A row is one line on a phone; the
+#: bytes past it are paid for by every row on every page load and rendered by
+#: none of them. A client that wants the whole message opens the thread.
+PREVIEW_MAX_CHARS = 140
+
+
+def system_line_label(body: str) -> str | None:
+    """The words this deployment gave a system marker — or ``None``.
+
+    A system line's body is machine vocabulary the HOST renders
+    (``chat.support.resolved``, ``video.call.ended:188``): this module does not
+    own those words in any language, so it ships no labels and the registry
+    (``STAPEL_CHAT['SYSTEM_LINE_LABELS']``) is empty out of the box. A marker
+    with no label draws nothing on a row and is found by no search — both from
+    the one rule in :func:`drawn_last_line`.
+
+    A marker may carry an argument after a colon; the label is looked up on
+    the exact body first and then on the part before the colon, and it is
+    static text (the argument is never interpolated — a module that formatted
+    "188" into a sentence would be inventing the sentence).
+    """
+    from .conf import chat_settings
+
+    labels = chat_settings.SYSTEM_LINE_LABELS or {}
+    if not labels:
+        return None
+    marker = (body or "").strip()
+    label = labels.get(marker)
+    if label is None and ":" in marker:
+        label = labels.get(marker.split(":", 1)[0])
+    return (label or "").strip() or None
+
+
+def drawn_last_line(*, kind: str, body: str, deleted: bool) -> str | None:
+    """THE text an inbox row draws for its last line, or ``None``.
+
+    ONE definition for the preview on every row AND for what
+    ``?search=`` matches on the last line — the same shape as
+    :func:`_unread_rows` and the unread chip. A row that comes back for a word
+    nobody can see on it reads as a bug in the search box; a row that draws a
+    word the search will not find reads as the same bug from the other side.
+
+    ``None`` for a tombstone (the row draws "deleted", never the withdrawn
+    body), for an attachment-only message (no text at all — the bubble is the
+    picture), and for a system marker this deployment gave no words to.
+    """
+    if deleted:
+        return None
+    if kind == MessageKind.SYSTEM:
+        return system_line_label(body)
+    return (body or "").strip() or None
+
+
+def preview_of(text: str | None) -> str | None:
+    """``text`` as a single plain line of at most :data:`PREVIEW_MAX_CHARS`."""
+    if not text:
+        return None
+    from django.utils.text import Truncator
+
+    flat = " ".join(str(text).split())
+    if not flat:
+        return None
+    return Truncator(flat).chars(PREVIEW_MAX_CHARS)
+
+
+def _last_line_q(*, needle: str) -> Q:
+    """What makes a row's LAST line match ``needle`` — the SQL half of
+    :func:`drawn_last_line`, over the very columns the preview is built from
+    (the ``last_message_*`` annotations of :func:`with_last_message`).
+
+    Matching the annotations rather than a second subquery of its own is what
+    makes "the preview and the search agree" a fact instead of a promise: the
+    text this reads IS the text the row ships. The label half is a lookup over
+    the settings registry rather than a column (labels are not in this
+    database), so it lands as an explicit body list. With no labels configured
+    — the default — this is exactly the 0.8.2 rule: a live, authored body,
+    matched case-insensitively.
+    """
+    from .conf import chat_settings
+
+    matches = Q(
+        last_message_sender_id__isnull=False,
+        last_message_deleted_at__isnull=True,
+        last_message_body__icontains=needle,
+    )
+    lowered = needle.lower()
+    labelled = Q()
+    for marker, label in (chat_settings.SYSTEM_LINE_LABELS or {}).items():
+        if label and lowered in str(label).lower():
+            labelled |= Q(last_message_body=marker) | Q(
+                last_message_body__startswith=f"{marker}:"
+            )
+    if labelled:
+        matches |= (
+            Q(
+                last_message_kind=MessageKind.SYSTEM,
+                last_message_deleted_at__isnull=True,
+            )
+            & labelled
+        )
+    return matches
+
+
+def _last_message_rows():
+    """The one message an inbox row draws: the thread's NEWEST message.
+
+    Newest by ``seq``, and deliberately not ``seq == conversation.last_seq``:
+    that counter is shared with the revision journal (:func:`_allocate_seq`
+    hands out one sequence for both roles), so the moment anything in a thread
+    is edited or deleted, ``last_seq`` is a number no message carries. A row
+    matched on it would go blank — and silently un-searchable by its own last
+    line — for exactly the threads people have been using most.
+    """
+    return Message.objects.filter(conversation=OuterRef("pk")).order_by("-seq")
+
+
+def with_last_message(qs):
+    """Annotate the row's last message onto a conversation queryset.
+
+    Six correlated subqueries in the SELECT the list already runs — the same
+    budget as :func:`with_viewer_unread`, which is the whole point: the
+    alternative a client is otherwise driven to is ``GET /messages?limit=1``
+    per row, and a fifty-row inbox does not get to be fifty requests. Each is
+    the first row of the ``(conversation, seq)`` index, read backwards.
+
+    The raw body and the deletion stamp are annotated, not the preview: the
+    text a row DRAWS is decided once, in :func:`drawn_last_line`, and
+    ``?search=`` reads these same columns (:func:`_last_line_q`), so the
+    preview and the search cannot drift apart.
+    :func:`~stapel_chat.views.conversation_to_dto` falls back to one query for
+    a conversation nobody annotated (the single-conversation reads).
+
+    The sender carries the user model's OWN primary-key field as its output
+    field: a bare subquery over an FK column hands back whatever the driver
+    stored (SQLite: a UUID with its dashes rubbed out), and an id a client
+    cannot match against the participant list on the same row is worse than no
+    id at all.
+    """
+    last = _last_message_rows()
+    sender_pk = Message._meta.get_field("sender").target_field
+    return qs.annotate(
+        last_message_seq=Subquery(last.values("seq")[:1]),
+        last_message_kind=Subquery(last.values("kind")[:1]),
+        last_message_body=Subquery(last.values("body")[:1]),
+        last_message_deleted_at=Subquery(last.values("deleted_at")[:1]),
+        last_message_sender_id=Subquery(
+            last.values("sender_id")[:1], output_field=sender_pk
+        ),
+        last_message_created_at=Subquery(last.values("created_at")[:1]),
+    )
+
+
+def last_message_of(conversation: Conversation):
+    """The single message an inbox row would draw, or ``None`` — ONE query.
+
+    The per-row read behind :func:`with_last_message`, for the reads that hold
+    one conversation rather than a page (and free for a thread nobody has
+    written in: ``last_seq`` is 0, so there is nothing to look up).
+    """
+    if not conversation.last_seq:
+        return None
+    return (
+        Message.objects.filter(conversation=conversation).order_by("-seq").first()
+    )
+
+
 def _subject_title_matches(qs, *, needle: str):
     """``(ids whose subject card matches, {(type, key): resolution})``.
 
@@ -902,7 +1070,11 @@ def _search_inbox(qs, *, viewer, needle: str):
     which is why ids, kinds and timestamps are not searched, and why the last
     line is matched only when the row would actually show it: a tombstone
     renders as "deleted" and a system line as machine vocabulary
-    (``video.call.ended:188``), so neither is searchable text.
+    (``video.call.ended:188``), so neither is searchable text. "Would actually
+    show it" is not a second opinion here: it is :func:`drawn_last_line`, the
+    rule that also produces the row's ``last_message.body_preview``. A marker
+    this deployment DID give words to (``SYSTEM_LINE_LABELS``) is drawn and
+    found by those words; one it did not is neither drawn nor found.
 
     The match is a case-insensitive substring (``icontains``), and it FILTERS —
     the anchor pagination then pages the filtered set, so ``anchor`` /
@@ -927,20 +1099,13 @@ def _search_inbox(qs, *, viewer, needle: str):
                 .filter(name_q)
             )
         )
-    # The LAST line, found by its seq: Conversation.last_seq is the thread's
-    # high-water mark, so this is the row the inbox draws, not any older one
-    # that happens to contain the word.
-    matched |= Q(
-        Exists(
-            Message.objects.filter(
-                conversation=OuterRef("pk"),
-                seq=OuterRef("last_seq"),
-                sender__isnull=False,
-                deleted_at__isnull=True,
-                body__icontains=needle,
-            )
-        )
-    )
+    # The LAST line — the newest message in the thread, not any older one that
+    # happens to contain the word, and read off the very annotations the row's
+    # `last_message.body_preview` is rendered from. `drawn_last_line` is the
+    # rule; `_last_line_q` is its SQL half.
+    if "last_message_seq" not in qs.query.annotations:
+        qs = with_last_message(qs)
+    matched |= _last_line_q(needle=needle)
     subject_ids, resolutions = _subject_title_matches(qs, needle=needle)
     if subject_ids:
         matched |= Q(id__in=subject_ids)

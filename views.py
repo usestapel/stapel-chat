@@ -29,6 +29,7 @@ from .conf import chat_settings
 from .dto import (
     AttachmentResponse,
     ConversationResponse,
+    LastMessageResponse,
     MessageResponse,
     ParticipantResponse,
     SubjectResponse,
@@ -209,6 +210,50 @@ def subject_to_dto(conv: Conversation, resolution=None) -> SubjectResponse | Non
     )
 
 
+def last_message_to_dto(conv: Conversation) -> LastMessageResponse | None:
+    """The line the row draws under the title — from the page's annotation.
+
+    A list annotates the whole page in its own query
+    (:func:`services.with_last_message`); a caller that hands over a
+    conversation nobody annotated pays the one read it needs
+    (:func:`services.last_message_of`), exactly as the unread count does. What
+    is NOT allowed is a preview computed here from a rule of its own: the text
+    a row draws is :func:`services.drawn_last_line`, the same rule
+    ``?search=`` matches on, and a second copy of it would let the search find
+    a row whose preview says something else.
+    """
+    if hasattr(conv, "last_message_seq"):  # annotated: a page, or a detail read
+        seq = conv.last_message_seq
+        if seq is None:  # annotated and empty — a thread with no messages
+            return None
+        kind = conv.last_message_kind
+        body = conv.last_message_body
+        deleted_at = conv.last_message_deleted_at
+        sender_id = conv.last_message_sender_id
+        created_at = conv.last_message_created_at
+    else:
+        msg = services.last_message_of(conv)
+        if msg is None:
+            return None
+        seq, kind, body = msg.seq, msg.kind, msg.body
+        deleted_at, sender_id, created_at = (
+            msg.deleted_at,
+            msg.sender_id,
+            msg.created_at,
+        )
+    return LastMessageResponse(
+        seq=int(seq),
+        kind=kind,
+        sender_id=str(sender_id) if sender_id else None,
+        created_at=created_at,
+        body_preview=services.preview_of(
+            services.drawn_last_line(
+                kind=kind, body=body or "", deleted=deleted_at is not None
+            )
+        ),
+    )
+
+
 def conversation_to_dto(
     conv: Conversation,
     viewer_participant=None,
@@ -250,6 +295,7 @@ def conversation_to_dto(
             str(conv.assigned_operator_id) if conv.assigned_operator_id else None
         ),
         subject=subject_to_dto(conv, subject_resolution),
+        last_message=last_message_to_dto(conv),
         participants=[
             ParticipantResponse(
                 user_id=str(p.user_id),
@@ -280,8 +326,11 @@ def _scoped(request):
 
 
 def _get_conversation(request, conversation_id):
+    # The last line rides along in the same SELECT here too: a single read
+    # already knows its own seq, and annotating costs nothing where the
+    # per-row fallback in `last_message_to_dto` would cost a query.
     return (
-        _scoped(request)
+        services.with_last_message(_scoped(request))
         .prefetch_related("participants")
         .filter(id=conversation_id)
         .first()
@@ -347,9 +396,13 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
                     "first name and last name out of the box), the SUBJECT "
                     "CARD'S TITLE where the thread carries a subject (the "
                     "fields that subject type's `search_fields` policy names, "
-                    "`title` by default), and the LAST MESSAGE'S body. A "
-                    "tombstone and a system line are never matched — neither is "
-                    "text a reader can see. Filters BEFORE paging: anchor, "
+                    "`title` by default), and the LAST MESSAGE'S body — the "
+                    "very text that row's `last_message.body_preview` ships, "
+                    "one rule for both. A tombstone is never matched (it draws "
+                    "as deleted), and neither is a system marker, unless this "
+                    "deployment gave that marker words in "
+                    "STAPEL_CHAT['SYSTEM_LINE_LABELS'] — then the row draws "
+                    "the label and those words find it. Filters BEFORE paging: anchor, "
                     "direction and limit walk the filtered list and mean "
                     "exactly what they mean without a search. Blank or "
                     "whitespace-only is no search at all. Title matching covers "
@@ -385,6 +438,10 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
         # what `unread=true` filters on — one rule, so the filter and the badge
         # can never disagree.
         qs = services.with_viewer_unread(qs, viewer=request.user)
+        # …and the line every row draws under the title, in the same SELECT.
+        # Without it a client has one request per row to paint an inbox, which
+        # is the shape `GET /messages?limit=1` per conversation would have.
+        qs = services.with_last_message(qs)
         qs, resolved_subjects = services.filter_inbox(
             qs,
             viewer=request.user,

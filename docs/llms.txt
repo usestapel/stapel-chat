@@ -1,8 +1,8 @@
-# stapel-chat 0.8.2
+# stapel-chat 0.8.3
 
 Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).
 
-Contract: axes 15 · surface 24 · extension points 9 · operations 13 · error codes 65.
+Contract: axes 15 · surface 29 · extension points 9 · operations 13 · error codes 65.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -48,6 +48,9 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
 - delete_message — stapel_chat.services.delete_message
   instead of: stapel_chat.models.Message.objects.delete
   Turn a message into a TOMBSTONE — content emptied, deleted_at stamped, fresh revision sequence — instead of removing the row. Deleting the row destroys the message on the server and leaves every copy on every other device, because nothing tells those devices which id ceased to exist.
+- drawn_last_line — stapel_chat.services.drawn_last_line
+  instead of: stapel_chat.models.Message.body
+  THE text a conversation-list row draws for its last line, or None — one rule for the preview a row ships AND for what ?search= matches on that line. A tombstone, a body-less message and an unlabelled system marker draw nothing. A second copy of it is how a search finds rows whose preview says something else.
 - edit_message — stapel_chat.services.edit_message
   instead of: stapel_chat.models.Message.objects.update
   Replace a message body, stamp edited_at, and — the part a hand-written update always misses — take a FRESH revision sequence. Anchored on the message's own seq an edit sits behind a cursor every client has already acknowledged, so nobody who was offline would ever see it.
@@ -91,20 +94,30 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
   The inbox's two filters — a search over the three things a row DRAWS (counterpart name, subject card title, last line) and unread-only — applied before the anchor page is taken. A body icontains instead finds rows by text nobody can see and misses the two fields that are not in this database.
 - journal_rows — stapel_chat.services.journal_rows
   The replay source a resuming socket reads: rows past the client's cursor by REVISION sequence. Filtering on the message's own seq is the bug this exists to prevent — it silently drops every edit and tombstone that happened while the client was away.
+- last_message_of — stapel_chat.services.last_message_of
+  instead of: stapel_chat.models.Message.objects.filter
+  The one message an inbox row would draw, for a caller holding a single conversation — newest by seq. Filtering on Conversation.last_seq finds NOTHING once anything in the thread was edited or deleted: that counter is shared with the revision journal.
 - post_message — stapel_chat.services.post_message
   instead of: stapel_chat.models.Message.objects.create
   THE send path, and the only sanctioned way a message comes into being: allocates the next seq under a row lock, persists the row and the chat.message outbox event in ONE transaction, normalizes and CDN-enriches the attachments once, fans out to the sockets on commit, and returns the existing row when a client_msg_id is retried. Inserting a Message with your own seq bypasses the counter, breaks the order history paging and realtime resume both anchor on, emits nothing, and reaches no open socket.
 - presence_for — stapel_chat.services.presence_for
   instead of: stapel_chat.models.UserPresence.objects.filter
   Resolve, in ONE query, whether each participant of these conversations is connected right now and when they were last seen. Reach for it whenever you render a thread header or an inbox: presence is a fact about the OTHER person's own sockets, and a client that derives it from its own socket state is stating that its network is up while labelling it with somebody else's name — the defect this call exists to make impossible.
+- preview_of — stapel_chat.services.preview_of
+  A body as ONE plain line of at most 140 characters — what a row has space for. The whole body is paid for by every row on every page load and rendered by none of them.
 - subject_cards_for — stapel_chat.services.subject_cards_for
   instead of: stapel_core.comm.call
   Resolve the subject cards for a whole list of conversations in ONE call per subject type, by asking each type's registered card_function. Reach for it whenever you render more than one conversation: resolving per conversation turns a fifty-row inbox into fifty round trips, which is the entire reason the provider contract is a batch.
 - support_queue — stapel_chat.services.support_queue
   The operator queue as a queryset: unassigned support threads still open or pending, oldest first. Pass qs= to pre-scope it rather than re-deriving the filter — a second copy of "what is still waiting" drifts from the one assign_operator enforces.
+- system_line_label — stapel_chat.services.system_line_label
+  The words this deployment gave a system marker (SYSTEM_LINE_LABELS), or None. Printing chat.support.resolved or video.call.ended:188 at a reader is what this prevents; an unlabelled marker draws nothing and is found by nothing.
 - unread_count — stapel_chat.services.unread_count
   instead of: stapel_chat.models.Message.objects.count
   Messages past a participant's marker that somebody else authored — system lines, your own messages and tombstones excluded. A naive seq__gt count lights the badge for your own message, for every system line, and for a message deleted before you got to it: a badge nobody can clear.
+- with_last_message — stapel_chat.services.with_last_message
+  instead of: stapel_chat.services.last_message_of
+  Annotate the line every inbox row draws — the newest message's seq, kind, author, time and body — onto a whole PAGE, inside the SELECT the list already runs. The alternative a client is driven to is GET /messages?limit=1 per row: fifty requests for a fifty-row inbox.
 - with_viewer_unread — stapel_chat.services.with_viewer_unread
   instead of: stapel_chat.services.unread_count
   Annotate the caller's unread count onto a whole PAGE of conversations — the read marker, then a count over it, two subqueries however many rows. Any list that draws a badge wants this; unread_count per row is one query per conversation.

@@ -49,7 +49,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Case-insensitive substring over the three things an inbox row draws: the COUNTERPART'S DISPLAY NAME (the user-model fields STAPEL_CHAT['SEARCH_NAME_FIELDS'] names — username, first name and last name out of the box), the SUBJECT CARD'S TITLE where the thread carries a subject (the fields that subject type's `search_fields` policy names, `title` by default), and the LAST MESSAGE'S body. A tombstone and a system line are never matched — neither is text a reader can see. Filters BEFORE paging: anchor, direction and limit walk the filtered list and mean exactly what they mean without a search. Blank or whitespace-only is no search at all. Title matching covers the newest STAPEL_CHAT['SEARCH_SUBJECT_SCAN'] subject threads (500 by default); older ones are still matched by name and last line."
+            "description": "Case-insensitive substring over the three things an inbox row draws: the COUNTERPART'S DISPLAY NAME (the user-model fields STAPEL_CHAT['SEARCH_NAME_FIELDS'] names — username, first name and last name out of the box), the SUBJECT CARD'S TITLE where the thread carries a subject (the fields that subject type's `search_fields` policy names, `title` by default), and the LAST MESSAGE'S body — the very text that row's `last_message.body_preview` ships, one rule for both. A tombstone is never matched (it draws as deleted), and neither is a system marker, unless this deployment gave that marker words in STAPEL_CHAT['SYSTEM_LINE_LABELS'] — then the row draws the label and those words find it. Filters BEFORE paging: anchor, direction and limit walk the filtered list and mean exactly what they mean without a search. Blank or whitespace-only is no search at all. Title matching covers the newest STAPEL_CHAT['SEARCH_SUBJECT_SCAN'] subject threads (500 by default); older ones are still matched by name and last line."
           },
           {
             "in": "query",
@@ -844,6 +844,15 @@
             "nullable": true,
             "description": "What the thread is about, with its rendered card inlined —"
           },
+          "last_message": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LastMessageResponse"
+              }
+            ],
+            "nullable": true,
+            "description": "The line this row draws under the title, or ``null``"
+          },
           "participants": {
             "type": "array",
             "items": {
@@ -891,6 +900,40 @@
             "description": "Ignored — the scope is resolved server-side from the"
           }
         }
+      },
+      "LastMessageResponse": {
+        "type": "object",
+        "description": "The one line an inbox row draws under the title.\n\nA projection, not a message: enough to PAINT the row, and deliberately not\nenough to stand in for the thread (no id, no attachments, no revision\ncursor — a client that wants those opens the conversation). It is annotated\nfor a whole page in the same query the list already costs, because the\nalternative a client is otherwise driven to — ``GET /messages?limit=1`` per\nrow — is fifty requests for a fifty-row inbox.",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "description": "That message's position in the thread — the newest one in it"
+          },
+          "kind": {
+            "type": "string",
+            "description": "``text`` or ``system``"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was posted — what the row timestamps"
+          },
+          "sender_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Author's user id, or null for a system line"
+          },
+          "body_preview": {
+            "type": "string",
+            "nullable": true,
+            "description": "The text the row DRAWS for that line, or ``null``"
+          }
+        },
+        "required": [
+          "created_at",
+          "kind",
+          "seq"
+        ]
       },
       "MarkReadRequest": {
         "type": "object",

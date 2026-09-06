@@ -1,6 +1,6 @@
 {
   "module": "stapel-chat",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "provides": "Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; and a support layer (queue, first-come assignment, open/pending/resolved with reopen).",
   "axes": [
     {
@@ -339,6 +339,15 @@
       ]
     },
     {
+      "name": "drawn_last_line",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.drawn_last_line",
+      "intent": "THE text a conversation-list row draws for its last line, or None — one rule for the preview a row ships AND for what ?search= matches on that line. A tombstone, a body-less message and an unlabelled system marker draw nothing. A second copy of it is how a search finds rows whose preview says something else.",
+      "instead_of": [
+        "stapel_chat.models.Message.body"
+      ]
+    },
+    {
       "name": "edit_message",
       "kind": "gate_function",
       "path": "stapel_chat.services.edit_message",
@@ -370,6 +379,15 @@
       "kind": "factory",
       "path": "stapel_chat.services.journal_rows",
       "intent": "The replay source a resuming socket reads: rows past the client's cursor by REVISION sequence. Filtering on the message's own seq is the bug this exists to prevent — it silently drops every edit and tombstone that happened while the client was away."
+    },
+    {
+      "name": "last_message_of",
+      "kind": "factory",
+      "path": "stapel_chat.services.last_message_of",
+      "intent": "The one message an inbox row would draw, for a caller holding a single conversation — newest by seq. Filtering on Conversation.last_seq finds NOTHING once anything in the thread was edited or deleted: that counter is shared with the revision journal.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.filter"
+      ]
     },
     {
       "name": "mark_delivered",
@@ -426,6 +444,12 @@
       ]
     },
     {
+      "name": "preview_of",
+      "kind": "factory",
+      "path": "stapel_chat.services.preview_of",
+      "intent": "A body as ONE plain line of at most 140 characters — what a row has space for. The whole body is paid for by every row on every page load and rendered by none of them."
+    },
+    {
       "name": "reopen_support",
       "kind": "gate_function",
       "path": "stapel_chat.services.reopen_support",
@@ -459,12 +483,27 @@
       "intent": "The operator queue as a queryset: unassigned support threads still open or pending, oldest first. Pass qs= to pre-scope it rather than re-deriving the filter — a second copy of \"what is still waiting\" drifts from the one assign_operator enforces."
     },
     {
+      "name": "system_line_label",
+      "kind": "factory",
+      "path": "stapel_chat.services.system_line_label",
+      "intent": "The words this deployment gave a system marker (SYSTEM_LINE_LABELS), or None. Printing chat.support.resolved or video.call.ended:188 at a reader is what this prevents; an unlabelled marker draws nothing and is found by nothing."
+    },
+    {
       "name": "unread_count",
       "kind": "factory",
       "path": "stapel_chat.services.unread_count",
       "intent": "Messages past a participant's marker that somebody else authored — system lines, your own messages and tombstones excluded. A naive seq__gt count lights the badge for your own message, for every system line, and for a message deleted before you got to it: a badge nobody can clear.",
       "instead_of": [
         "stapel_chat.models.Message.objects.count"
+      ]
+    },
+    {
+      "name": "with_last_message",
+      "kind": "factory",
+      "path": "stapel_chat.services.with_last_message",
+      "intent": "Annotate the line every inbox row draws — the newest message's seq, kind, author, time and body — onto a whole PAGE, inside the SELECT the list already runs. The alternative a client is driven to is GET /messages?limit=1 per row: fifty requests for a fifty-row inbox.",
+      "instead_of": [
+        "stapel_chat.services.last_message_of"
       ]
     },
     {
