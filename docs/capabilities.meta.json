@@ -147,6 +147,13 @@
         "stapel_chat.models.Message.body"
       ]
     },
+    "last_line_reason": {
+      "kind": "gate_function",
+      "intent": "Which of the three body_preview: null cases this row is in — deleted, attachment or system — or None when there are words. Decided once over the same columns drawn_last_line reads, so a client that wants to say Message deleted rather than the Attachment it would otherwise guess never has to.",
+      "instead_of": [
+        "stapel_chat.models.Message.deleted_at"
+      ]
+    },
     "preview_of": {
       "kind": "factory",
       "intent": "A body as ONE plain line of at most 140 characters — what a row has space for. The whole body is paid for by every row on every page load and rendered by none of them."

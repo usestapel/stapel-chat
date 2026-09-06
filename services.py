@@ -897,6 +897,39 @@ def drawn_last_line(*, kind: str, body: str, deleted: bool) -> str | None:
     return (body or "").strip() or None
 
 
+def last_line_reason(
+    *, kind: str, body: str, deleted: bool, has_attachments: bool
+) -> str | None:
+    """Why :func:`drawn_last_line` returned ``None`` for this message.
+
+    ``body_preview: null`` collapses three cases a client cannot tell apart on
+    the wire: a tombstone, a message with no body at all, and a system marker
+    this deployment gave no words. A row that would have said "Message
+    deleted" was saying "Attachment" instead — right for the common case,
+    wrong (and worse, never "deleted") for the other. This names which one:
+
+    - ``"deleted"``: a tombstone — the withdrawn body is never drawn.
+    - ``"attachment"``: no body, but the message carries attachments — the
+      bubble is the picture, not a line of text.
+    - ``"system"``: a system marker with no label
+      (``STAPEL_CHAT['SYSTEM_LINE_LABELS']``) — machine vocabulary this
+      module owns in no language.
+    - ``None``: :func:`drawn_last_line` returned words — ``body_preview`` has
+      something to show and there is nothing to explain.
+
+    A body-less, attachment-less, non-deleted text message cannot exist over
+    the API (``post_message`` refuses it), so that shape falls through to
+    ``None`` rather than inventing a fourth reason for it.
+    """
+    if deleted:
+        return "deleted"
+    if kind == MessageKind.SYSTEM:
+        return None if system_line_label(body) else "system"
+    if not (body or "").strip():
+        return "attachment" if has_attachments else None
+    return None
+
+
 def preview_of(text: str | None) -> str | None:
     """``text`` as a single plain line of at most :data:`PREVIEW_MAX_CHARS`."""
     if not text:
@@ -963,16 +996,17 @@ def _last_message_rows():
 def with_last_message(qs):
     """Annotate the row's last message onto a conversation queryset.
 
-    Six correlated subqueries in the SELECT the list already runs — the same
-    budget as :func:`with_viewer_unread`, which is the whole point: the
+    Seven correlated subqueries in the SELECT the list already runs — the
+    same budget as :func:`with_viewer_unread`, which is the whole point: the
     alternative a client is otherwise driven to is ``GET /messages?limit=1``
     per row, and a fifty-row inbox does not get to be fifty requests. Each is
     the first row of the ``(conversation, seq)`` index, read backwards.
 
-    The raw body and the deletion stamp are annotated, not the preview: the
-    text a row DRAWS is decided once, in :func:`drawn_last_line`, and
-    ``?search=`` reads these same columns (:func:`_last_line_q`), so the
-    preview and the search cannot drift apart.
+    The raw body, the deletion stamp and the attachments list are annotated,
+    not the preview or its reason: the text a row DRAWS is decided once, in
+    :func:`drawn_last_line`, and why a null one is null is decided once, in
+    :func:`last_line_reason` — ``?search=`` reads these same columns
+    (:func:`_last_line_q`), so the preview and the search cannot drift apart.
     :func:`~stapel_chat.views.conversation_to_dto` falls back to one query for
     a conversation nobody annotated (the single-conversation reads).
 
@@ -993,6 +1027,7 @@ def with_last_message(qs):
             last.values("sender_id")[:1], output_field=sender_pk
         ),
         last_message_created_at=Subquery(last.values("created_at")[:1]),
+        last_message_attachments=Subquery(last.values("attachments")[:1]),
     )
 
 

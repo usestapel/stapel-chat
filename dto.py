@@ -234,6 +234,16 @@ class LastMessageResponse:
             a reader is worse than printing nothing. ``kind`` says which case
             it is, so a client renders its own phrase rather than guessing.
             ``last_message`` itself is null only for a thread with no messages.
+        preview_reason: Which of the three ``null`` cases this is, or
+            ``null`` when ``body_preview`` has words. ``"deleted"`` for a
+            tombstone, ``"attachment"`` for a body-less message that carries
+            attachments, ``"system"`` for a system marker with no label. A
+            client that wants to say "Message deleted" rather than the
+            "Attachment" it defaults to (right for the common case, wrong —
+            and never "deleted" — for the other) reads this instead of
+            guessing from ``kind`` alone. Decided once, in
+            ``services.last_line_reason``, over the same columns
+            ``body_preview`` is built from.
     """
 
     seq: int
@@ -241,6 +251,7 @@ class LastMessageResponse:
     created_at: datetime
     sender_id: Optional[str] = None
     body_preview: Optional[str] = None
+    preview_reason: Optional[str] = None
 
 
 @dataclass

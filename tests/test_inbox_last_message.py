@@ -58,6 +58,7 @@ class TestTheProjection:
             "sender_id": str(other_user.id),
             "created_at": row["last_message"]["created_at"],
             "body_preview": "Is the bicycle still there?",
+            "preview_reason": None,
         }
         # The row's own high-water mark and the preview's seq are the same
         # message — that is how a client knows the line it holds is current.
@@ -86,6 +87,7 @@ class TestTheProjection:
         assert last["kind"] == "text"
         assert last["sender_id"] == str(other_user.id)
         assert last["body_preview"] is None
+        assert last["preview_reason"] == "deleted"
 
     def test_the_preview_is_one_plain_line_and_never_longer_than_140(
         self, auth_client, user, other_user
@@ -156,6 +158,7 @@ class TestSystemLines:
         # machine vocabulary shown to a person; `kind` is what the client
         # renders its own phrase from.
         assert last["body_preview"] is None
+        assert last["preview_reason"] == "system"
 
     def test_a_labelled_marker_draws_its_label(
         self, auth_client, user, other_user, settings
@@ -167,9 +170,10 @@ class TestSystemLines:
         settings.STAPEL_CHAT = {
             "SYSTEM_LINE_LABELS": {"chat.support.resolved": "Ticket resolved"}
         }
-        assert _row(auth_client, conv)["last_message"]["body_preview"] == (
-            "Ticket resolved"
-        )
+        last = _row(auth_client, conv)["last_message"]
+        assert last["body_preview"] == "Ticket resolved"
+        # A labelled marker draws words, so there is nothing left to explain.
+        assert last["preview_reason"] is None
 
     def test_the_label_is_found_on_the_marker_not_on_its_argument(
         self, auth_client, user, other_user, settings
@@ -205,7 +209,84 @@ class TestSystemLines:
         from stapel_chat.models import Message
 
         Message.objects.filter(pk=line.pk).update(deleted_at=timezone.now())
-        assert _row(auth_client, conv)["last_message"]["body_preview"] is None
+        last = _row(auth_client, conv)["last_message"]
+        assert last["body_preview"] is None
+        # Deletion wins over a label: a withdrawn system line reads as
+        # "deleted", not as "system" — the labelled word is what was withdrawn.
+        assert last["preview_reason"] == "deleted"
+
+
+class TestPreviewReason:
+    """`preview_reason` names which of the three `body_preview: null` cases a
+    row is in, so a client that wants "Message deleted" rather than the
+    "Attachment" it would otherwise default to can tell the difference."""
+
+    def test_an_attachment_only_message_previews_as_nothing_and_says_so(
+        self, auth_client, user, other_user
+    ):
+        conv = services.create_direct(owner=user, other_user_id=other_user.id)
+        msg = services.post_message(
+            conversation=conv,
+            sender=other_user,
+            body="",
+            attachments=[{"key": "product/abc", "type": "image"}],
+        )
+
+        last = _row(auth_client, conv)["last_message"]
+        assert last["seq"] == msg.seq
+        assert last["body_preview"] is None
+        assert last["preview_reason"] == "attachment"
+
+    def test_a_row_with_words_reports_no_reason(
+        self, auth_client, user, other_user
+    ):
+        conv = services.create_direct(owner=user, other_user_id=other_user.id)
+        services.post_message(conversation=conv, sender=other_user, body="hello")
+
+        last = _row(auth_client, conv)["last_message"]
+        assert last["body_preview"] == "hello"
+        assert last["preview_reason"] is None
+
+    def test_the_rule_itself(self):
+        assert (
+            services.last_line_reason(
+                kind="text", body="hi", deleted=False, has_attachments=False
+            )
+            is None
+        )
+        assert (
+            services.last_line_reason(
+                kind="text", body="hi", deleted=True, has_attachments=False
+            )
+            == "deleted"
+        )
+        assert (
+            services.last_line_reason(
+                kind="text", body="", deleted=False, has_attachments=True
+            )
+            == "attachment"
+        )
+        assert (
+            services.last_line_reason(
+                kind="system", body="x.y", deleted=False, has_attachments=False
+            )
+            == "system"
+        )
+        # Deletion is checked first: a withdrawn attachment-only message, or a
+        # withdrawn system line, both read as "deleted" — never as the case
+        # that would have applied had it not been withdrawn.
+        assert (
+            services.last_line_reason(
+                kind="text", body="", deleted=True, has_attachments=True
+            )
+            == "deleted"
+        )
+        assert (
+            services.last_line_reason(
+                kind="system", body="x.y", deleted=True, has_attachments=False
+            )
+            == "deleted"
+        )
 
 
 # ── One rule, not two ────────────────────────────────────────────────────

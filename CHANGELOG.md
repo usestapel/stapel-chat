@@ -4,6 +4,33 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] — 2026-09-06
+
+### Added — `preview_reason` names which `body_preview: null` this is
+
+`body_preview: null` collapsed three cases into one indistinguishable
+absence — a tombstone, a body-less (attachment-only) message, and a system
+marker this deployment gave no words to. A consumer that wanted to draw
+"Message deleted" could not tell that case apart from an attachment, and
+defaulted to "Attachment" for both: right for the common case, and wrong —
+never "deleted" over a withdrawn message — for the other.
+
+`LastMessageResponse` now carries `preview_reason`:
+
+```json
+"last_message": {
+  "seq": 42, "kind": "text", "sender_id": "…", "created_at": "…",
+  "body_preview": null, "preview_reason": "deleted"
+}
+```
+
+`null` whenever `body_preview` has words; otherwise `"deleted"`,
+`"attachment"` or `"system"` — one new function, `services.last_line_reason`,
+decided once over the same columns `services.drawn_last_line` already reads
+(`services.with_last_message`'s annotation gains the raw `attachments` list;
+`services.last_message_of` already carried it). The query-count test stays
+flat: the reason rides in the same SELECT the preview always did.
+
 ## [0.8.3] — 2026-09-06
 
 ### Added — a conversation-list row carries the line it draws

@@ -927,6 +927,11 @@
             "type": "string",
             "nullable": true,
             "description": "The text the row DRAWS for that line, or ``null``"
+          },
+          "preview_reason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Which of the three ``null`` cases this is, or"
           }
         },
         "required": [

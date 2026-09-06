@@ -231,6 +231,7 @@ def last_message_to_dto(conv: Conversation) -> LastMessageResponse | None:
         deleted_at = conv.last_message_deleted_at
         sender_id = conv.last_message_sender_id
         created_at = conv.last_message_created_at
+        attachments = conv.last_message_attachments
     else:
         msg = services.last_message_of(conv)
         if msg is None:
@@ -241,15 +242,21 @@ def last_message_to_dto(conv: Conversation) -> LastMessageResponse | None:
             msg.sender_id,
             msg.created_at,
         )
+        attachments = msg.attachments
+    deleted = deleted_at is not None
     return LastMessageResponse(
         seq=int(seq),
         kind=kind,
         sender_id=str(sender_id) if sender_id else None,
         created_at=created_at,
         body_preview=services.preview_of(
-            services.drawn_last_line(
-                kind=kind, body=body or "", deleted=deleted_at is not None
-            )
+            services.drawn_last_line(kind=kind, body=body or "", deleted=deleted)
+        ),
+        preview_reason=services.last_line_reason(
+            kind=kind,
+            body=body or "",
+            deleted=deleted,
+            has_attachments=bool(attachments),
         ),
     )
 
