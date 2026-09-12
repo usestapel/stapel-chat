@@ -176,6 +176,31 @@
         "stapel_chat.models.ConversationParticipant.objects.update"
       ]
     },
+    "clear_conversation": {
+      "kind": "gate_function",
+      "intent": "A person clearing THEIR OWN history of a thread: stamps their participant row cleared_at, so everything written at or before that instant leaves their message list, their unread count, their inbox preview and their search — and leaves every message row, every marker and the other party's whole thread untouched. Reach for it behind «Очистить историю»; deleting messages instead hands one party the power to erase the other's words and the system lines, which no surface in this module grants, and stamping the row by hand skips the chat.conversation.cleared signal their other tabs are waiting on.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.delete"
+      ]
+    },
+    "visible_messages": {
+      "kind": "factory",
+      "intent": "A message queryset as the holder of a cleared_at is served it — the ONE rule the history endpoint, the single-message read and the socket's replay all go through. A null mark returns the queryset untouched, because created_at > NULL is NULL in SQL and would empty it; a second copy of the comparison is how a cleared message comes back through one door while being gone from another.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.filter"
+      ]
+    },
+    "with_viewer_cleared_at": {
+      "kind": "factory",
+      "intent": "Annotate viewer_cleared_at — never null, floored to an instant no message predates — on a conversation queryset, once per page for the unread count and the last-line projection to point their own subqueries at. Re-annotating is a no-op, so neither caller has to know whether the other asked.",
+      "instead_of": [
+        "stapel_chat.models.Conversation.objects.annotate"
+      ]
+    },
+    "cleared_at_of": {
+      "kind": "factory",
+      "intent": "One person's own cleared mark on one thread, in one query — the per-row read for a caller holding no participant row. A caller that already has the row reads participant.cleared_at off it instead."
+    },
     "inbox_of": {
       "kind": "factory",
       "intent": "The conversations that belong on one person's list — a party to the thread who has not left it. Any list, badge or count that filters on participants__user alone shows threads the caller left, and split across two filter() calls the ORM joins the participant table twice and matches \"is you\" against \"has not left\" on different rows, which is every thread with two people in it.",

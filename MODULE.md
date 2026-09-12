@@ -446,6 +446,7 @@ Three rules that do not bend:
 | Signal | `chat.delivered` | `{conversation_id, user_id, last_delivered_seq}` | ephemeral |
 | Signal | `chat.activity` | `{conversation_id, user_id, state, ttl_s}` | ephemeral |
 | Signal | `chat.inbox` | `{conversation_id, conversation_kind, last_seq, message{…}}` | ephemeral, on `chat:user:<id>` |
+| Signal | `chat.conversation.cleared` | `{conversation_id, user_id, cleared_at}` | ephemeral, on `chat:user:<id>` — the clearer's OWN tabs, never the counterpart's |
 
 Signals are **not** Actions: no outbox, no retry, no history. Delivering
 "typing…" five minutes late is worse than not delivering it.
@@ -511,6 +512,7 @@ an `error` frame.
 | `chat.delivered` | `{conversation_id, user_id, last_delivered_seq}` | — |
 | `chat.activity` | `{conversation_id, user_id, state, ttl_s}` | — |
 | `chat.inbox` | `{conversation_id, conversation_kind, last_seq, message}` | — (inbox stream) |
+| `chat.conversation.cleared` | `{conversation_id, user_id, cleared_at}` | — (inbox stream) |
 
 #### the message payload
 
@@ -575,6 +577,7 @@ GET|DELETE /chat/api/v1/conversations/{id}
 GET|POST   /chat/api/v1/conversations/{id}/messages
 PATCH|DELETE /chat/api/v1/conversations/{id}/messages/{message_id}
 POST       /chat/api/v1/conversations/{id}/rejoin
+POST       /chat/api/v1/conversations/{id}/clear
 POST       /chat/api/v1/conversations/{id}/read        {upto_seq, delivered_upto_seq?}
 POST       /chat/api/v1/conversations/{id}/activity    {state}
 GET        /chat/api/v1/support/queue
@@ -683,6 +686,63 @@ that same marker silently whenever anyone writes an authored message
 (`_resurface_participants`); a line here and none there would announce one
 half of one transition and make a client's rendering depend on which of the
 two paths the thread came back by.
+
+#### Clearing your own history — `POST /conversations/{id}/clear` (0.9.0)
+
+The standard messenger affordance, and standard in what it does **not** do.
+The caller's participant row is stamped `cleared_at`; not one message row is
+read or written.
+
+```
+POST /chat/api/v1/conversations/{id}/clear   -> 204
+```
+
+| | the clearer | the other participant |
+|---|---|---|
+| messages before the mark | gone from `GET …/messages`, from `unread_count`, from `last_message` and from `?search=` | untouched, all of them |
+| the message rows | **not one is deleted, edited or re-journalled** | — |
+| the thread on the list | still there, live, writable — with no badge and no preview | unchanged |
+| the participant row | stamped `cleared_at` | untouched, and not told |
+| messages after the mark | listed, counted, previewed, searched — normally | unchanged |
+
+**It is a mark on the reader, never a delete.** A participant may erase only
+the words they wrote themselves (`error.403.chat_not_author`), and the system
+lines — `video.call.ended:0`, `chat.participant.left:…` — cannot be removed by
+anybody at all. A "clear history" implemented as a delete would hand either
+party exactly the power the rest of this module refuses them, over a thread
+that is the record of a deal between two people. Erasure keeps its one path in
+this fleet: `user.deleted` into `ChatGDPRProvider`.
+
+The mark is a floor on `Message.created_at` — deliberately not on `seq`, which
+doubles as the revision journal, so a mark stored as a seq would be crossed by
+the next edit of an older message and let it back in. One rule
+(`services.visible_messages`) and one page annotation
+(`services.with_viewer_cleared_at`) bound **every** read: the history
+endpoint, the single-message read by id (`404`, the same answer the list gives
+by not listing it), the inbox preview, `?search=` (which matches the very
+annotations the preview is drawn from, so the two cannot drift apart) and the
+socket's **replay** — an old message edited after the mark takes a fresh
+`rev_seq`, which is exactly the row a catch-up would otherwise hand back to
+the person who cleared it.
+
+Every conversation response carries **`cleared_at`** at the top level: the
+requesting user's own mark, `null` until they clear. It is deliberately *not*
+on `participants[]` beside `left_at` — clearing changes nothing the other
+party can observe, and a field telling one person the other tidied their view
+of the thread would turn a private act into a notification. For the same
+reason **no system line is posted**, unlike a departure.
+
+**Not idempotent, on purpose**: clearing again moves the mark to now, because
+"clear history" means "from here", and a person looking at a thread they have
+written in since means a later here. `204` every time; a caller who is not a
+party gets `403 error.403.chat_not_participant`.
+
+The clearer's own clients are told on their **inbox** stream —
+`chat.conversation.cleared` `{conversation_id, user_id, cleared_at}` on
+`chat:user:<id>`, and on nobody else's: their other tabs are the whole
+audience, and the conversation stream is shared with the counterpart. It is
+ephemeral like the read receipt: the durable answer is `cleared_at` on the
+conversation, so a client that missed the signal learns on its next read.
 
 #### Finding one conversation — `?search=` and `?unread=true` (0.8.2)
 

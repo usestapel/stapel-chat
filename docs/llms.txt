@@ -1,8 +1,8 @@
-# stapel-chat 0.8.6
+# stapel-chat 0.9.0
 
 Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; leaving a thread, which hides it for the person who left and takes nothing away from anybody else (their messages, the other party's copy and their own history by id all stay), un-hides on the next message written there, and is undoable (the left threads are listed by ?left=true and put back by POST /conversations/{id}/rejoin, which clears the departure and nothing else); and a support layer (queue, first-come assignment, open/pending/resolved with reopen).
 
-Contract: axes 15 · surface 34 · extension points 9 · operations 15 · error codes 65.
+Contract: axes 15 · surface 38 · extension points 9 · operations 16 · error codes 65.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -45,6 +45,9 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
   Fan out "typing…" (or any registered state) to everyone watching, with the TTL that makes the indicator expire on its own — the only design that survives a tab closed mid-word. Nothing is persisted; someone who is not connected is owed nothing.
 - assign_operator — stapel_chat.services.assign_operator
   First-come claim of a support thread under a row lock: refuses a second operator, stays idempotent for the same one, adds the participant, emits the event and posts the system line. Two operators pressing "take" in the same second is the race this exists for.
+- clear_conversation — stapel_chat.services.clear_conversation
+  instead of: stapel_chat.models.Message.objects.delete
+  A person clearing THEIR OWN history of a thread: stamps their participant row cleared_at, so everything written at or before that instant leaves their message list, their unread count, their inbox preview and their search — and leaves every message row, every marker and the other party's whole thread untouched. Reach for it behind «Очистить историю»; deleting messages instead hands one party the power to erase the other's words and the system lines, which no surface in this module grants, and stamping the row by hand skips the chat.conversation.cleared signal their other tabs are waiting on.
 - delete_message — stapel_chat.services.delete_message
   instead of: stapel_chat.models.Message.objects.delete
   Turn a message into a TOMBSTONE — content emptied, deleted_at stamped, fresh revision sequence — instead of removing the row. Deleting the row destroys the message on the server and leaves every copy on every other device, because nothing tells those devices which id ceased to exist.
@@ -89,6 +92,8 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
   instead of: stapel_chat.models.ConversationParticipant.objects.filter
   Answer, in one batched call, who is a party to each of these conversations — with the thread's kind and subject. Reach for it instead of storing your own copy of the two party ids on your own row: a copy nothing can refresh is a copy that goes stale the moment a participant changes here. Every id asked about is answered, including one that names nothing (exists: false), because a caller holding a dead id must be told rather than left to infer it from an absence.
 ### factory
+- cleared_at_of — stapel_chat.services.cleared_at_of
+  One person's own cleared mark on one thread, in one query — the per-row read for a caller holding no participant row. A caller that already has the row reads participant.cleared_at off it instead.
 - create_direct — stapel_chat.services.create_direct
   instead of: stapel_chat.models.Conversation.objects.get_or_create
   Get-or-create the 1:1 thread between two users — idempotent by an order-independent key over (scope, both ids), with the create race decided by a partial unique constraint. A hand-rolled get_or_create has nothing unique to key on and quietly hands the two users two different threads.
@@ -130,9 +135,15 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
 - unread_count — stapel_chat.services.unread_count
   instead of: stapel_chat.models.Message.objects.count
   Messages past a participant's marker that somebody else authored — system lines, your own messages and tombstones excluded. A naive seq__gt count lights the badge for your own message, for every system line, and for a message deleted before you got to it: a badge nobody can clear.
+- visible_messages — stapel_chat.services.visible_messages
+  instead of: stapel_chat.models.Message.objects.filter
+  A message queryset as the holder of a cleared_at is served it — the ONE rule the history endpoint, the single-message read and the socket's replay all go through. A null mark returns the queryset untouched, because created_at > NULL is NULL in SQL and would empty it; a second copy of the comparison is how a cleared message comes back through one door while being gone from another.
 - with_last_message — stapel_chat.services.with_last_message
   instead of: stapel_chat.services.last_message_of
   Annotate the line every inbox row draws — the newest message's seq, kind, author, time and body — onto a whole PAGE, inside the SELECT the list already runs. The alternative a client is driven to is GET /messages?limit=1 per row: fifty requests for a fifty-row inbox.
+- with_viewer_cleared_at — stapel_chat.services.with_viewer_cleared_at
+  instead of: stapel_chat.models.Conversation.objects.annotate
+  Annotate viewer_cleared_at — never null, floored to an instant no message predates — on a conversation queryset, once per page for the unread count and the last-line projection to point their own subqueries at. Re-annotating is a no-op, so neither caller has to know whether the other asked.
 - with_viewer_unread — stapel_chat.services.with_viewer_unread
   instead of: stapel_chat.services.unread_count
   Annotate the caller's unread count onto a whole PAGE of conversations — the read marker, then a count over it, two subqueries however many rows. Any list that draws a badge wants this; unread_count per row is one query per conversation.
@@ -163,10 +174,11 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
 - stapel-core (required) — comm bus (chat.message / chat.support.assigned emits via the outbox), JWT authentication (HTTP + optional Channels), AppSettings config layer, anchor pagination
 - stapel-realtime (required) — the WebSocket substrate — both consumers, the v1 wire envelope, the stream-key canon, the fail-closed authorize seam, the close-code set and the origin guard. Not optional: realtime is the canonical path, and chat previously carried its own duplicate socket implementation.
 
-## HTTP operations (15) — call by operationId, never by a typed path
+## HTTP operations (16) — call by operationId, never by a typed path
 Paths are relative to `/chat/api/v1/`.
 ### Chat
 - POST /conversations/{conversation_id}/activity — chat_api_v1_conversations_activity_create
+- POST /conversations/{conversation_id}/clear — chat_api_v1_conversations_clear_create
 - POST /conversations — chat_api_v1_conversations_create
 - DELETE /conversations/{conversation_id} — chat_api_v1_conversations_destroy
 - GET /conversations — chat_api_v1_conversations_list

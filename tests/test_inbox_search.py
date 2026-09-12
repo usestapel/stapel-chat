@@ -350,8 +350,12 @@ class TestQueryCount:
         """
         import stapel_chat.views as views
 
-        monkeypatch.setattr(views.services, "with_last_message", lambda qs: qs)
-        monkeypatch.setattr(views, "last_message_to_dto", lambda conv: None)
+        monkeypatch.setattr(
+            views.services, "with_last_message", lambda qs, **kwargs: qs
+        )
+        monkeypatch.setattr(
+            views, "last_message_to_dto", lambda conv, *args, **kwargs: None
+        )
         before = self._measure(auth_client, user, {}, 4, "c", previews=False)
 
         monkeypatch.undo()

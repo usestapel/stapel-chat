@@ -303,6 +303,24 @@ class ConversationResponse:
             every row of the default list (a thread you left is not on it) and
             never ``null`` on ``?left=true``, which orders by this value,
             newest departure first.
+        cleared_at: Where the REQUESTING user's history of this thread starts
+            — ``null`` until they clear it (``POST
+            /conversations/{id}/clear``). Everything created at or before this
+            instant is already gone from what this caller is served: it is not
+            in the message list, not in ``unread_count``, not in
+            ``last_message`` and not found by ``?search=``. It is here so a
+            client can say "history cleared" instead of drawing a thread that
+            merely looks empty, and so an open socket knows where to cut the
+            bubbles it is holding.
+
+            **The caller's own, and nobody else's.** It is deliberately not on
+            :class:`ParticipantResponse` beside ``left_at``: clearing changes
+            nothing the other party can observe, and a field telling one
+            person that the other tidied their view of the thread would make
+            a private act into a notification. Nothing else moves — the
+            messages exist, the counterpart's thread is untouched, and the
+            next message either side writes is after the mark and shows
+            normally.
     """
 
     id: str
@@ -320,6 +338,7 @@ class ConversationResponse:
     last_message: Optional[LastMessageResponse] = None
     participants: List[ParticipantResponse] = field(default_factory=list)
     left_at: Optional[datetime] = None
+    cleared_at: Optional[datetime] = None
 
 
 # ── Request DTOs ────────────────────────────────────────────────────────

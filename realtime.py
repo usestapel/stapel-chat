@@ -54,6 +54,12 @@ SIGNAL_DELIVERED = "chat.delivered"
 SIGNAL_ACTIVITY = "chat.activity"
 #: Something happened in a conversation this user takes part in (inbox).
 SIGNAL_INBOX = "chat.inbox"
+#: A participant cleared their own history of a conversation. See
+#: :func:`stapel_chat.services.clear_conversation`. On the participant's own
+#: INBOX stream, never the conversation's: clearing is a fact about one
+#: reader, and the conversation stream is shared with the counterpart, who
+#: must not be told that the other side tidied their view of the thread.
+SIGNAL_CLEARED = "chat.conversation.cleared"
 #: A participant connected or went away. See :mod:`stapel_chat.presence`.
 #: Ephemeral for the same reason the read receipt is: the durable answer rides
 #: back on every participant in the conversation body, so a subscriber that
@@ -178,6 +184,32 @@ def broadcast_delivered(conv, user_id, last_delivered_seq: int) -> None:
     )
 
 
+def broadcast_cleared(conversation_id, user_id, cleared_at) -> None:
+    """One reader cleared their own history of a thread.
+
+    Sent to that reader's OWN inbox stream (``chat:user:<id>``) and to nobody
+    else's — their other tabs are the whole audience. The counterpart's view
+    did not change, so there is nothing to tell them, and putting this on the
+    conversation stream would broadcast to the other party that this one
+    tidied up. Ephemeral for the same reason the read receipt is: the durable
+    answer is ``cleared_at`` on the participant row, which comes back on the
+    conversation over REST, so a client that missed the signal learns on its
+    next read rather than being owed a replay.
+
+    ``cleared_at`` travels with it so an open thread can drop the bubbles it
+    is already holding without re-fetching the page to find out where to cut.
+    """
+    _signal(
+        user_stream(user_id),
+        SIGNAL_CLEARED,
+        {
+            "conversation_id": str(conversation_id),
+            "user_id": str(user_id),
+            "cleared_at": cleared_at.isoformat() if cleared_at else None,
+        },
+    )
+
+
 def broadcast_activity(conversation_id, user_id, state: str, ttl_s: int) -> None:
     """"typing…" and its siblings. Nothing is written; nothing is owed to
     anyone who was not watching. ``ttl_s`` is the client's expiry hint, so no
@@ -242,11 +274,13 @@ def revoke_participant(conversation_id, user_id, reason: str = "left_conversatio
 
 __all__ = [
     "SIGNAL_ACTIVITY",
+    "SIGNAL_CLEARED",
     "SIGNAL_DELIVERED",
     "SIGNAL_INBOX",
     "SIGNAL_READ",
     "STREAM_MODULE",
     "broadcast_activity",
+    "broadcast_cleared",
     "broadcast_delivered",
     "broadcast_message",
     "broadcast_read",

@@ -115,13 +115,21 @@ def _server_seq(conversation_id) -> int:
     return row["last_seq"] if row else 0
 
 
-def _replay(conversation_id, after_seq: int, limit: int) -> list:
+def _replay(conversation_id, after_seq: int, limit: int, user_id=None) -> list:
     from . import services
 
+    cleared_at = (
+        services.cleared_at_of(conversation_id, user_id)
+        if user_id is not None
+        else None
+    )
     return [
         JournalRow(seq=m.rev_seq, payload=message_payload(m, m.conversation))
         for m in services.journal_rows(
-            conversation_id=conversation_id, after_seq=after_seq, limit=limit
+            conversation_id=conversation_id,
+            after_seq=after_seq,
+            limit=limit,
+            cleared_at=cleared_at,
         )
     ]
 
@@ -420,8 +428,11 @@ class ChatConsumer(PresenceMixin, ResumableStreamConsumer):
         return await database_sync_to_async(_server_seq)(self.conversation_id)
 
     async def get_replay_rows(self, after_seq: int, limit: int):
+        # The catch-up is served to ONE subscriber, so it is bounded by that
+        # subscriber's own cleared mark — a rule applied to the REST history
+        # and not to the replay is a rule with a socket-shaped hole in it.
         return await database_sync_to_async(_replay)(
-            self.conversation_id, after_seq, limit
+            self.conversation_id, after_seq, limit, self._user_id()
         )
 
     # ── chat's write frames ──────────────────────────────────────────────

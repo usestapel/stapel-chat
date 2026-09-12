@@ -100,7 +100,23 @@ PYTHON ?= python3
 # thread. Neither entry is decoration: the whole verb is what it does not
 # touch, and that is exactly what a one-line summary drops.
 # Trim before raising it again.
-LLMS_BUDGET ?= 7400
+# Raised again in 0.9.0, from 7400, by 400: a person can now CLEAR their own
+# history of a thread, which is four surface entries and a verb defined
+# entirely by what it does NOT do. The lines that would have to go to fit 7400
+# are the three an agent gets wrong on its own. First, that clearing is a MARK
+# ON THE READER and never a delete — an agent that reads only "clear history"
+# writes the message deletion it was reaching for, which hands either party
+# the power to erase the other's words and the system lines that no surface in
+# this module grants anybody. Second, that the mark bounds the list, the
+# unread count, the inbox preview, `?search=` AND the socket's replay, through
+# one rule (`visible_messages`) and one page annotation
+# (`with_viewer_cleared_at`): a rule applied to the history endpoint alone
+# leaves a cleared message reachable by its own id and re-delivered by the
+# catch-up the next time anybody edits it. Third, that the floor is a VALUE
+# and not NULL — `created_at > NULL` is NULL in SQL, so the obvious
+# implementation hides every message from everybody who never cleared
+# anything. Trim before raising it again.
+LLMS_BUDGET ?= 7800
 
 .PHONY: contract contract-check
 

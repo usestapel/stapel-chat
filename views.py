@@ -83,6 +83,7 @@ __all__ = [
     "ConversationListCreateView",
     "ConversationDetailView",
     "RejoinConversationView",
+    "ClearConversationView",
     "MessageListCreateView",
     "MessageDetailView",
     "MarkReadView",
@@ -227,7 +228,9 @@ def subject_to_dto(conv: Conversation, resolution=None) -> SubjectResponse | Non
     )
 
 
-def last_message_to_dto(conv: Conversation) -> LastMessageResponse | None:
+def last_message_to_dto(
+    conv: Conversation, viewer_participant=None
+) -> LastMessageResponse | None:
     """The line the row draws under the title — from the page's annotation.
 
     A list annotates the whole page in its own query
@@ -238,6 +241,12 @@ def last_message_to_dto(conv: Conversation) -> LastMessageResponse | None:
     a row draws is :func:`services.drawn_last_line`, the same rule
     ``?search=`` matches on, and a second copy of it would let the search find
     a row whose preview says something else.
+
+    Both paths are bounded by the viewer's own cleared mark: the annotated one
+    by the page's query (``services.with_last_message(viewer=…)``) and the
+    fallback by ``viewer_participant.cleared_at``, which the caller is already
+    holding — so a row whose history this person cleared draws the same blank
+    line a thread nobody has written in draws, whichever path produced it.
     """
     if hasattr(conv, "last_message_seq"):  # annotated: a page, or a detail read
         seq = conv.last_message_seq
@@ -250,7 +259,12 @@ def last_message_to_dto(conv: Conversation) -> LastMessageResponse | None:
         created_at = conv.last_message_created_at
         attachments = conv.last_message_attachments
     else:
-        msg = services.last_message_of(conv)
+        msg = services.last_message_of(
+            conv,
+            cleared_at=(
+                viewer_participant.cleared_at if viewer_participant is not None else None
+            ),
+        )
         if msg is None:
             return None
         seq, kind, body = msg.seq, msg.kind, msg.body
@@ -319,7 +333,7 @@ def conversation_to_dto(
             str(conv.assigned_operator_id) if conv.assigned_operator_id else None
         ),
         subject=subject_to_dto(conv, subject_resolution),
-        last_message=last_message_to_dto(conv),
+        last_message=last_message_to_dto(conv, viewer_participant),
         participants=[
             ParticipantResponse(
                 user_id=str(p.user_id),
@@ -344,6 +358,11 @@ def conversation_to_dto(
         # off `viewer_left_at`, so a detail read and every listing answer with
         # the same field rather than the `?left=true` page alone.
         left_at=viewer_participant.left_at if viewer_participant is not None else None,
+        # The caller's own mark, and only ever the caller's — see the field's
+        # docstring for why it is not on `participants` beside `left_at`.
+        cleared_at=(
+            viewer_participant.cleared_at if viewer_participant is not None else None
+        ),
     )
 
 
@@ -358,9 +377,11 @@ def _scoped(request):
 def _get_conversation(request, conversation_id):
     # The last line rides along in the same SELECT here too: a single read
     # already knows its own seq, and annotating costs nothing where the
-    # per-row fallback in `last_message_to_dto` would cost a query.
+    # per-row fallback in `last_message_to_dto` would cost a query. Annotated
+    # FOR the requesting user, so a thread they cleared draws a blank line
+    # here exactly as it does on their list.
     return (
-        services.with_last_message(_scoped(request))
+        services.with_last_message(_scoped(request), viewer=request.user)
         .prefetch_related("participants")
         .filter(id=conversation_id)
         .first()
@@ -496,7 +517,7 @@ class ConversationListCreateView(SerializerSeamMixin, APIView):
         # …and the line every row draws under the title, in the same SELECT.
         # Without it a client has one request per row to paint an inbox, which
         # is the shape `GET /messages?limit=1` per conversation would have.
-        qs = services.with_last_message(qs)
+        qs = services.with_last_message(qs, viewer=request.user)
         qs, resolved_subjects = services.filter_inbox(
             qs,
             viewer=request.user,
@@ -720,6 +741,55 @@ class RejoinConversationView(SerializerSeamMixin, APIView):
 
 
 @extend_schema(tags=["Chat"])
+class ClearConversationView(SerializerSeamMixin, APIView):
+    """Clear your own history of a thread — ``POST /conversations/{id}/clear``
+    -> ``204``.
+
+    The standard messenger affordance, and standard in what it does NOT do.
+    The caller's participant row is stamped ``cleared_at`` and **no message is
+    deleted, edited or touched in any way**: everything created at or before
+    that instant simply stops being served to this caller — it leaves their
+    message list, their ``unread_count``, their ``last_message`` preview and
+    their ``?search=``. The other participant's thread does not change by a
+    field. This is why it exists as a mark rather than a delete: a thread is
+    the record of a deal between two people, a participant may erase only the
+    words they wrote themselves (``error.403.chat_not_author``), and nobody at
+    all may erase the system lines — a "clear history" that removed rows would
+    hand either party exactly the power the rest of this module refuses them.
+
+    The thread stays on the list, live and writable. The mark is a floor on
+    ``created_at``, never a state on a message, so the next line either side
+    writes is after it and is listed, counted and previewed normally — which
+    is the difference between this and leaving (``DELETE`` on the same URL,
+    which takes the thread off the list and leaves the history alone: the
+    exact opposite half).
+
+    **Not idempotent, on purpose.** Clearing again moves the mark to now, and
+    a client that lost the response and retried has cleared a thread it had
+    just cleared — which changes nothing it can see unless something arrived
+    in between, in which case moving the mark is what the person asked for.
+    ``204`` every time, because there is nothing to say: the new mark is on
+    the conversation (``cleared_at``) and on the caller's own inbox stream
+    (``chat.conversation.cleared``), which is where a second tab learns of it.
+
+    A caller who is not a party gets ``403`` with the module's one membership
+    key, the same answer ``GET`` on this conversation gives them.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=None, responses={204: None})
+    def post(self, request, conversation_id):  # noqa: R007
+        conv = _get_conversation(request, conversation_id)
+        if conv is None:
+            return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
+        if _my_participant(conv, request.user) is None:
+            return StapelErrorResponse(403, ERR_403_NOT_PARTICIPANT)
+        services.clear_conversation(conversation=conv, user=request.user)
+        return StapelResponse(status=status.HTTP_204_NO_CONTENT)
+
+
+@extend_schema(tags=["Chat"])
 class MessageListCreateView(SerializerSeamMixin, APIView):
     """History (anchor by seq, both directions) or send a message."""
 
@@ -733,9 +803,17 @@ class MessageListCreateView(SerializerSeamMixin, APIView):
         conv = _get_conversation(request, conversation_id)
         if conv is None:
             return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
-        if _my_participant(conv, request.user) is None:
+        participant = _my_participant(conv, request.user)
+        if participant is None:
             return StapelErrorResponse(403, ERR_403_NOT_PARTICIPANT)
-        qs = Message.objects.filter(conversation=conv).select_related("sender")
+        # History starts where this reader's own `cleared_at` says it does —
+        # the one rule (`services.visible_messages`) the single-message read
+        # and the socket's replay go through too, so a message that is off
+        # this person's thread cannot come back through another door.
+        qs = services.visible_messages(
+            Message.objects.filter(conversation=conv),
+            cleared_at=participant.cleared_at,
+        ).select_related("sender")
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request)
         response_cls = self.get_response_serializer_class()
@@ -825,9 +903,17 @@ class MessageDetailView(SerializerSeamMixin, APIView):
         conv = _get_conversation(request, conversation_id)
         if conv is None:
             return None, None, StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
-        if _my_participant(conv, request.user) is None:
+        participant = _my_participant(conv, request.user)
+        if participant is None:
             return None, None, StapelErrorResponse(403, ERR_403_NOT_PARTICIPANT)
-        msg = Message.objects.filter(pk=message_id, conversation=conv).first()
+        # A message this caller cleared is not in their thread, so it is not
+        # found by its id either: 404, the same answer the history gives by
+        # simply not listing it. Anything else would leave the one door open
+        # through which a cleared message can still be read back.
+        msg = services.visible_messages(
+            Message.objects.filter(pk=message_id, conversation=conv),
+            cleared_at=participant.cleared_at,
+        ).first()
         if msg is None:
             return None, None, StapelErrorResponse(404, ERR_404_MESSAGE_NOT_FOUND)
         return conv, msg, None

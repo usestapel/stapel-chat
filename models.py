@@ -226,6 +226,21 @@ class ConversationParticipant(models.Model):
     A message somebody *writes* clears the marker again for everyone in the
     thread (:func:`stapel_chat.services.leave_conversation` states the whole
     rule) — a thread being written in is a live thread.
+
+    ``cleared_at`` is where this participant's history starts for them, and
+    ``null`` for everyone who has never cleared it. It is the standard
+    messenger "clear history **for me**": every message created at or before
+    the mark stops being listed, counted, previewed and searched **for this
+    participant only** — no row is touched, no message is deleted, and the
+    other side's thread is not changed in any way. Clearing again moves the
+    mark forward; messages written after it show normally, because the mark
+    is a floor on ``Message.created_at`` and never a state on a message.
+    :func:`stapel_chat.services.clear_conversation` states the whole rule.
+
+    Why ``created_at`` and not ``seq``: ``seq`` doubles as the revision
+    journal (:class:`Message`), so a mark stored as a seq would be crossed by
+    the next edit of an *older* message and let it back into a cleared
+    thread. The instant a message was written never moves.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -248,6 +263,11 @@ class ConversationParticipant(models.Model):
     # a second index on a column that is null for almost every row would be
     # paid for by every send.
     left_at = models.DateTimeField(null=True, blank=True, default=None)
+    # Null = this participant has never cleared their history. See the class
+    # docstring: this hides, for one person, and deletes nothing. No index of
+    # its own, for the reason `left_at` has none — every read of it is already
+    # narrowed to one user's participations by `chat_participant_user`.
+    cleared_at = models.DateTimeField(null=True, blank=True, default=None)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

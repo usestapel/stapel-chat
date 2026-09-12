@@ -4,6 +4,76 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-09-12
+
+### Added — clear history, for me
+
+A participant could delete only the messages they wrote themselves
+(`error.403.chat_not_author`), and the system lines — `video.call.ended:0`,
+`chat.participant.left:…` — could be removed by nobody at all. Both rules are
+right and neither is going away; what was missing beside them is the affordance
+every messenger has, which is not a delete:
+
+```
+POST /chat/api/v1/conversations/{id}/clear   ->  204 No Content
+```
+
+It stamps `cleared_at` on the **caller's own participant row**. Not one message
+row is read or written. Everything created at or before that instant simply
+stops being served to that one caller — it leaves their message list, their
+`unread_count`, their `last_message` preview and their `?search=`. The other
+participant's thread does not change by a field, and is not told.
+
+| | the clearer | the other participant |
+|---|---|---|
+| messages before the mark | gone from every read they make | untouched, all of them |
+| the message rows | **none deleted, edited or re-journalled** | — |
+| the thread on the list | still there, live and writable — no badge, no preview | unchanged |
+| messages after the mark | listed, counted, previewed, searched — normally | unchanged |
+
+**Why a mark and not a delete.** In this fleet a thread is the record of a deal
+between two people. A "clear history" that removed rows would hand either party
+exactly the power the rest of this module refuses them — over the other's words
+and over the lines that say what happened. Erasure keeps its one path,
+`user.deleted` into `ChatGDPRProvider`.
+
+**The mark is a floor on `created_at`, never a state on a message** — and
+deliberately not a `seq`: that counter doubles as the revision journal, so a
+mark stored as a seq would be crossed by the next edit of an older message and
+let it back into a cleared thread.
+
+**One rule bounds every read**, not just the obvious one. `services.visible_messages`
+(the per-row form) and `services.with_viewer_cleared_at` (the page annotation)
+are what the history endpoint, the single-message read by id, the unread count,
+the inbox preview, `?search=` and **the socket's replay** all go through. The
+last two are the ones a narrower implementation gets wrong: the search matches
+the very annotations the preview is drawn from, so a cleared line cannot stay
+findable by words the row no longer draws; and `rev_seq` is re-allocated on
+every edit, so a message from before the mark that the counterpart corrects
+afterwards is exactly the row a catch-up would otherwise hand back to the
+person who cleared it.
+
+- `cleared_at` rides at the **top level** of every conversation response — the
+  requesting user's own mark, `null` until they clear. It is deliberately *not*
+  on `participants[]` beside `left_at`: clearing changes nothing the other
+  party can observe, and a field telling one person that the other tidied their
+  view of the thread would turn a private act into a notification. For the same
+  reason **no system line is posted**, unlike a departure.
+- **Not idempotent, on purpose.** Clearing again moves the mark to now —
+  "clear history" means "from here", and a person looking at a thread they have
+  written in since means a later here. `204` every time.
+- `403 error.403.chat_not_participant` for a non-party; `404` for an unknown
+  thread — the same answers `GET` on that conversation gives them.
+- **Realtime:** `chat.conversation.cleared` `{conversation_id, user_id,
+  cleared_at}` on `chat:user:<id>` — the clearer's OWN inbox stream and nobody
+  else's, so their other tabs drop the bubbles they hold. Ephemeral like the
+  read receipt: the durable answer comes back on the conversation.
+- **Migration** `0007_participant_cleared_at`: one nullable column, purely
+  additive, nothing backfilled, no message row touched.
+- The floor a never-cleared reader is compared against is a **value**, not
+  `NULL` — `created_at > NULL` is `NULL` in SQL, which reads as false and would
+  hide every message from everybody who never cleared anything.
+
 ## [0.8.6] — 2026-09-06
 
 ### Added — leaving a conversation is undoable

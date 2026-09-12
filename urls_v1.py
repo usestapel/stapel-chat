@@ -11,6 +11,7 @@ from django.urls import path
 
 from .views import (
     ActivityView,
+    ClearConversationView,
     ConversationDetailView,
     ConversationListCreateView,
     MarkReadView,
@@ -53,6 +54,11 @@ urlpatterns = [
         "conversations/<uuid:conversation_id>/rejoin",
         RejoinConversationView.as_view(),
         name="chat-conversation-rejoin",
+    ),
+    path(
+        "conversations/<uuid:conversation_id>/clear",
+        ClearConversationView.as_view(),
+        name="chat-conversation-clear",
     ),
     path(
         "conversations/<uuid:conversation_id>/activity",

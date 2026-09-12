@@ -1,6 +1,6 @@
 {
   "module": "stapel-chat",
-  "version": "0.8.6",
+  "version": "0.9.0",
   "provides": "Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; leaving a thread, which hides it for the person who left and takes nothing away from anybody else (their messages, the other party's copy and their own history by id all stay), un-hides on the next message written there, and is undoable (the left threads are listed by ?left=true and put back by POST /conversations/{id}/rejoin, which clears the departure and nothing else); and a support layer (queue, first-come assignment, open/pending/resolved with reopen).",
   "axes": [
     {
@@ -294,6 +294,21 @@
       "intent": "First-come claim of a support thread under a row lock: refuses a second operator, stays idempotent for the same one, adds the participant, emits the event and posts the system line. Two operators pressing \"take\" in the same second is the race this exists for."
     },
     {
+      "name": "clear_conversation",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.clear_conversation",
+      "intent": "A person clearing THEIR OWN history of a thread: stamps their participant row cleared_at, so everything written at or before that instant leaves their message list, their unread count, their inbox preview and their search — and leaves every message row, every marker and the other party's whole thread untouched. Reach for it behind «Очистить историю»; deleting messages instead hands one party the power to erase the other's words and the system lines, which no surface in this module grants, and stamping the row by hand skips the chat.conversation.cleared signal their other tabs are waiting on.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.delete"
+      ]
+    },
+    {
+      "name": "cleared_at_of",
+      "kind": "factory",
+      "path": "stapel_chat.services.cleared_at_of",
+      "intent": "One person's own cleared mark on one thread, in one query — the per-row read for a caller holding no participant row. A caller that already has the row reads participant.cleared_at off it instead."
+    },
+    {
       "name": "conversation_participants",
       "kind": "predicate",
       "path": "stapel_chat.services.conversation_participants",
@@ -543,12 +558,30 @@
       ]
     },
     {
+      "name": "visible_messages",
+      "kind": "factory",
+      "path": "stapel_chat.services.visible_messages",
+      "intent": "A message queryset as the holder of a cleared_at is served it — the ONE rule the history endpoint, the single-message read and the socket's replay all go through. A null mark returns the queryset untouched, because created_at > NULL is NULL in SQL and would empty it; a second copy of the comparison is how a cleared message comes back through one door while being gone from another.",
+      "instead_of": [
+        "stapel_chat.models.Message.objects.filter"
+      ]
+    },
+    {
       "name": "with_last_message",
       "kind": "factory",
       "path": "stapel_chat.services.with_last_message",
       "intent": "Annotate the line every inbox row draws — the newest message's seq, kind, author, time and body — onto a whole PAGE, inside the SELECT the list already runs. The alternative a client is driven to is GET /messages?limit=1 per row: fifty requests for a fifty-row inbox.",
       "instead_of": [
         "stapel_chat.services.last_message_of"
+      ]
+    },
+    {
+      "name": "with_viewer_cleared_at",
+      "kind": "factory",
+      "path": "stapel_chat.services.with_viewer_cleared_at",
+      "intent": "Annotate viewer_cleared_at — never null, floored to an instant no message predates — on a conversation queryset, once per page for the unread count and the last-line projection to point their own subqueries at. Re-annotating is a no-op, so neither caller has to know whether the other asked.",
+      "instead_of": [
+        "stapel_chat.models.Conversation.objects.annotate"
       ]
     },
     {
@@ -561,7 +594,7 @@
       ]
     }
   ],
-  "operations_total": 15,
+  "operations_total": 16,
   "requires": [
     {
       "module": "stapel-core",

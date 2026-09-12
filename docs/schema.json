@@ -248,6 +248,36 @@
         }
       }
     },
+    "/chat/api/v1/conversations/{conversation_id}/clear": {
+      "post": {
+        "operationId": "chat_api_v1_conversations_clear_create",
+        "description": "Clear your own history of a thread — ``POST /conversations/{id}/clear``\n-> ``204``.\n\nThe standard messenger affordance, and standard in what it does NOT do.\nThe caller's participant row is stamped ``cleared_at`` and **no message is\ndeleted, edited or touched in any way**: everything created at or before\nthat instant simply stops being served to this caller — it leaves their\nmessage list, their ``unread_count``, their ``last_message`` preview and\ntheir ``?search=``. The other participant's thread does not change by a\nfield. This is why it exists as a mark rather than a delete: a thread is\nthe record of a deal between two people, a participant may erase only the\nwords they wrote themselves (``error.403.chat_not_author``), and nobody at\nall may erase the system lines — a \"clear history\" that removed rows would\nhand either party exactly the power the rest of this module refuses them.\n\nThe thread stays on the list, live and writable. The mark is a floor on\n``created_at``, never a state on a message, so the next line either side\nwrites is after it and is listed, counted and previewed normally — which\nis the difference between this and leaving (``DELETE`` on the same URL,\nwhich takes the thread off the list and leaves the history alone: the\nexact opposite half).\n\n**Not idempotent, on purpose.** Clearing again moves the mark to now, and\na client that lost the response and retried has cleared a thread it had\njust cleared — which changes nothing it can see unless something arrived\nin between, in which case moving the mark is what the person asked for.\n``204`` every time, because there is nothing to say: the new mark is on\nthe conversation (``cleared_at``) and on the caller's own inbox stream\n(``chat.conversation.cleared``), which is where a second tab learns of it.\n\nA caller who is not a party gets ``403`` with the module's one membership\nkey, the same answer ``GET`` on this conversation gives them.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No response body"
+          }
+        }
+      }
+    },
     "/chat/api/v1/conversations/{conversation_id}/messages": {
       "get": {
         "operationId": "chat_api_v1_conversations_messages_list",
@@ -931,6 +961,12 @@
             "format": "date-time",
             "nullable": true,
             "description": "When the REQUESTING user left this thread — ``null`` while"
+          },
+          "cleared_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Where the REQUESTING user's history of this thread starts"
           }
         },
         "required": [

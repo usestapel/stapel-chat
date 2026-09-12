@@ -16,6 +16,7 @@ the durable rows by ``seq``.
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import uuid
 
@@ -750,6 +751,143 @@ def left_of(qs, *, viewer):
     )
 
 
+# ── Clearing history, for one reader ────────────────────────────────────
+
+
+def _history_floor():
+    """The instant a participant who has NEVER cleared is treated as at.
+
+    A value rather than ``NULL``, because ``created_at > NULL`` is ``NULL`` in
+    SQL — which reads as false and would hide every message from everybody who
+    never cleared anything. Coalescing to this instant is what lets one
+    expression mean "sees everything" for a null mark and "sees what came
+    after it" for a real one.
+
+    It follows ``USE_TZ`` so it can be compared with ``created_at`` on a host
+    that turned time zones off; no message predates it on either setting.
+    """
+    from django.conf import settings
+
+    floor = datetime.datetime(1970, 1, 1)
+    return floor.replace(tzinfo=datetime.timezone.utc) if settings.USE_TZ else floor
+
+
+def clear_conversation(*, conversation: Conversation, user):
+    """``user`` clears THEIR OWN history of ``conversation``. Returns the new
+    mark, or ``None`` if the caller is not a participant.
+
+    **It hides, for one person, and deletes nothing.** The participant row is
+    stamped ``cleared_at`` and not one message row is read or written: the
+    thread's messages are all still there, the counterpart's view of it does
+    not change by a single pixel, and the deployment's record of the deal is
+    intact. What changes is what THIS reader is served — every message created
+    at or before the mark stops being listed
+    (:func:`visible_messages`), counted (:func:`unread_count`,
+    :func:`_unread_rows`), previewed (:func:`with_last_message`) and found by
+    ``?search=`` (:func:`_last_line_q`, which reads those same preview
+    columns, so the two cannot disagree).
+
+    This is deliberately the only shape this affordance takes. A participant
+    may erase a message they wrote (``error.403.chat_not_author`` guards the
+    rest) and nobody — not the counterpart, not an operator — may erase
+    somebody else's words or the thread's system lines; a "clear history" that
+    destroyed rows would be exactly that power, handed to either party, over a
+    transcript that is the record of a deal between them. Erasure still has
+    one path in this fleet, ``user.deleted`` into
+    :class:`~stapel_chat.gdpr.ChatGDPRProvider`.
+
+    **New messages show normally.** The mark is a floor on
+    ``Message.created_at``, never a state on a message, so the thread keeps
+    working the instant after it is set: the next line either side writes is
+    after the mark and is listed, counted and previewed like any other.
+
+    Clearing again simply **moves the mark forward** — the call is not
+    idempotent and is not meant to be, because "clear history" means "from
+    here", and a second call from a person looking at a thread they have
+    written in since is a second, later here. It always returns the mark it
+    wrote.
+
+    No system line is posted, and that asymmetry with a departure
+    (:func:`leave_conversation`) is the point: a departure is announced
+    because the counterpart is otherwise left facing silence they cannot
+    explain, while clearing changes nothing the counterpart can observe —
+    announcing it in the shared transcript would be the leak, not the courtesy.
+    The one thing sent is :data:`~stapel_chat.realtime.SIGNAL_CLEARED`, on the
+    clearer's OWN inbox stream, so their other tabs drop the bubbles they hold.
+    """
+    now = timezone.now()
+    with transaction.atomic():
+        stamped = ConversationParticipant.objects.filter(
+            conversation=conversation, user=user
+        ).update(cleared_at=now)
+        if not stamped:
+            return None
+        # After commit: the row that decides what this reader is served has to
+        # be durable before a socket is told to drop what it is holding.
+        transaction.on_commit(
+            lambda: realtime.broadcast_cleared(conversation.pk, user.pk, now)
+        )
+    return now
+
+
+def cleared_at_of(conversation, user):
+    """``user``'s own mark on ``conversation``, or ``None`` — ONE query.
+
+    The per-row read, for callers holding no participant row (the socket's
+    replay is the one in this package). Either argument may be an instance or
+    a bare id, because the caller that needs this most — a consumer — has ids
+    and nothing else. A caller that already has the participant row reads
+    ``participant.cleared_at`` off it instead; nothing here is worth a query
+    somebody already paid for.
+    """
+    return (
+        ConversationParticipant.objects.filter(
+            conversation_id=getattr(conversation, "pk", conversation),
+            user_id=getattr(user, "pk", user),
+        )
+        .values_list("cleared_at", flat=True)
+        .first()
+    )
+
+
+def visible_messages(qs, *, cleared_at):
+    """``qs`` as the holder of ``cleared_at`` is served it.
+
+    ONE rule, read by the history endpoint, the single-message read and the
+    socket's replay, so a message that is off a person's list cannot come back
+    through another door. A null mark returns the queryset untouched — never a
+    comparison against null, which would empty it.
+    """
+    if cleared_at is None:
+        return qs
+    return qs.filter(created_at__gt=cleared_at)
+
+
+def with_viewer_cleared_at(qs, *, viewer):
+    """Annotate ``viewer_cleared_at`` (never null — see :func:`_history_floor`)
+    on a conversation queryset, once per page and once per queryset.
+
+    The page-level twin of :func:`cleared_at_of`: one subquery for a whole
+    inbox, which the unread count and the last-line annotation then both point
+    their own subqueries at. Re-annotating is a no-op so the two callers can
+    each ask without knowing whether the other did.
+    """
+    if "viewer_cleared_at" in qs.query.annotations:
+        return qs
+    return qs.annotate(
+        viewer_cleared_at=Coalesce(
+            Subquery(
+                ConversationParticipant.objects.filter(
+                    conversation=OuterRef("pk"), user=viewer
+                ).values("cleared_at")[:1],
+                output_field=DateTimeField(),
+            ),
+            Value(_history_floor(), output_field=DateTimeField()),
+            output_field=DateTimeField(),
+        )
+    )
+
+
 # ── Editing and deletion ────────────────────────────────────────────────
 
 
@@ -964,10 +1102,16 @@ def unread_count(*, conversation: Conversation, participant: ConversationPartici
     """Messages newer than ``participant``'s read marker, authored by someone
     else. System lines (null sender) are excluded — they never raise a badge —
     and so are tombstones: a message that was deleted before you got to it
-    must not leave a badge you can never clear by reading anything."""
+    must not leave a badge you can never clear by reading anything. And so is
+    everything this participant cleared (:func:`clear_conversation`): a badge
+    that outlived the messages behind it is a badge nothing can clear, because
+    opening the thread shows none of what it is counting."""
     return (
-        Message.objects.filter(
-            conversation=conversation, seq__gt=participant.last_read_seq
+        visible_messages(
+            Message.objects.filter(
+                conversation=conversation, seq__gt=participant.last_read_seq
+            ),
+            cleared_at=participant.cleared_at,
         )
         .filter(sender__isnull=False, deleted_at__isnull=True)
         .exclude(sender_id=participant.user_id)
@@ -988,12 +1132,19 @@ def _unread_rows(*, viewer):
     participant row; this one an ``OuterRef``), and the two are pinned against
     each other in ``tests/test_inbox_search.py``.
 
-    Anchored on the ``viewer_last_read_seq`` annotation
-    (:func:`with_viewer_unread`), so it is a subquery per PAGE, not per row.
+    Anchored on the ``viewer_last_read_seq`` and ``viewer_cleared_at``
+    annotations (:func:`with_viewer_unread`), so it is a subquery per PAGE,
+    not per row.
     """
     return Message.objects.filter(
         conversation=OuterRef("pk"),
         seq__gt=OuterRef("viewer_last_read_seq"),
+        # The cleared floor, as the page's annotation rather than a second
+        # subquery: it is the same column `unread_count` reads off the
+        # participant row, and it is never null there (see `_history_floor`),
+        # so a person who cleared nothing is bounded by an instant no message
+        # is at or before.
+        created_at__gt=OuterRef("viewer_cleared_at"),
         sender__isnull=False,
         deleted_at__isnull=True,
     ).exclude(sender_id=viewer.pk)
@@ -1008,7 +1159,7 @@ def with_viewer_unread(qs, *, viewer):
     :func:`conversation_to_dto` falls back to the per-row call when it is
     handed a conversation nobody annotated (the single-conversation reads).
     """
-    marked = qs.annotate(
+    marked = with_viewer_cleared_at(qs, viewer=viewer).annotate(
         viewer_last_read_seq=Coalesce(
             Subquery(
                 ConversationParticipant.objects.filter(
@@ -1187,8 +1338,19 @@ def _last_message_rows():
     return Message.objects.filter(conversation=OuterRef("pk")).order_by("-seq")
 
 
-def with_last_message(qs):
+def with_last_message(qs, *, viewer=None):
     """Annotate the row's last message onto a conversation queryset.
+
+    ``viewer`` is who the row is being drawn FOR. Hand it over and the last
+    line is the newest message that viewer still has
+    (:func:`clear_conversation`) — a thread they cleared to the end draws the
+    same blank row a thread nobody has written in draws, which is exactly what
+    "the history is gone, for me" looks like on an inbox. It is optional only
+    so a caller with no viewer at all (a codegen probe, an admin read) is not
+    forced to invent one; every user-facing listing passes it, and ``?search=``
+    is carried along for free because :func:`_last_line_q` matches these very
+    annotations rather than a subquery of its own — a cleared line cannot be
+    found by words it no longer draws.
 
     Seven correlated subqueries in the SELECT the list already runs — the
     same budget as :func:`with_viewer_unread`, which is the whole point: the
@@ -1211,6 +1373,9 @@ def with_last_message(qs):
     id at all.
     """
     last = _last_message_rows()
+    if viewer is not None:
+        qs = with_viewer_cleared_at(qs, viewer=viewer)
+        last = last.filter(created_at__gt=OuterRef("viewer_cleared_at"))
     sender_pk = Message._meta.get_field("sender").target_field
     return qs.annotate(
         last_message_seq=Subquery(last.values("seq")[:1]),
@@ -1225,17 +1390,27 @@ def with_last_message(qs):
     )
 
 
-def last_message_of(conversation: Conversation):
+def last_message_of(conversation: Conversation, *, cleared_at=None):
     """The single message an inbox row would draw, or ``None`` — ONE query.
 
     The per-row read behind :func:`with_last_message`, for the reads that hold
     one conversation rather than a page (and free for a thread nobody has
     written in: ``last_seq`` is 0, so there is nothing to look up).
+
+    ``cleared_at`` is the viewer's own mark, which a caller that holds their
+    participant row already has — passing the stamp rather than the user is
+    what keeps this at one query. ``None`` means an unmarked reader, never
+    "hide nothing on purpose": the caller is asked for the value precisely so
+    that forgetting it is visible here as an argument nobody passed.
     """
     if not conversation.last_seq:
         return None
     return (
-        Message.objects.filter(conversation=conversation).order_by("-seq").first()
+        visible_messages(
+            Message.objects.filter(conversation=conversation), cleared_at=cleared_at
+        )
+        .order_by("-seq")
+        .first()
     )
 
 
@@ -1333,7 +1508,7 @@ def _search_inbox(qs, *, viewer, needle: str):
     # `last_message.body_preview` is rendered from. `drawn_last_line` is the
     # rule; `_last_line_q` is its SQL half.
     if "last_message_seq" not in qs.query.annotations:
-        qs = with_last_message(qs)
+        qs = with_last_message(qs, viewer=viewer)
     matched |= _last_line_q(needle=needle)
     subject_ids, resolutions = _subject_title_matches(qs, needle=needle)
     if subject_ids:
@@ -1355,17 +1530,27 @@ def filter_inbox(qs, *, viewer, search: str = "", unread_only: bool = False):
     return _search_inbox(qs, viewer=viewer, needle=search)
 
 
-def journal_rows(*, conversation_id, after_seq: int, limit: int):
+def journal_rows(*, conversation_id, after_seq: int, limit: int, cleared_at=None):
     """Rows a resuming socket has not seen, ordered by ``rev_seq``.
 
     The replay source for :class:`~stapel_chat.consumers.ChatConsumer`.
     Anchored on ``rev_seq``, **not** ``seq``, so an old message edited or
     deleted while the client was away is part of the catch-up. Tombstones are
     included on purpose — that is the whole point of keeping them.
+
+    ``cleared_at`` is the *subscriber's* own mark, and it belongs here for one
+    reason: ``rev_seq`` is re-allocated on every edit, so a message from
+    before the mark that somebody corrects afterwards would otherwise arrive
+    on the socket of the person who cleared it — the one door left open by a
+    rule applied to REST alone. Replay reads the same
+    :func:`visible_messages` the history endpoint does.
     """
     return (
-        Message.objects.filter(
-            conversation_id=conversation_id, rev_seq__gt=after_seq
+        visible_messages(
+            Message.objects.filter(
+                conversation_id=conversation_id, rev_seq__gt=after_seq
+            ),
+            cleared_at=cleared_at,
         )
         .select_related("conversation")
         .order_by("rev_seq")[:limit]
