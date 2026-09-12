@@ -32,9 +32,10 @@ def _client_for(user) -> APIClient:
 
 @pytest.fixture
 def thread(user, other_user):
-    """A direct thread carrying exactly what the darom demo thread carries: a
-    system line nobody may delete, and an authored message from the OTHER side
-    — so the caller's row starts out with an unread badge and a preview."""
+    """A direct thread shaped like the one a marketplace storefront produces:
+    a system line nobody may delete, and an authored message from the OTHER
+    side — so the caller's row starts out with an unread badge and a
+    preview."""
     conv = services.create_direct(owner=user, other_user_id=other_user.id)
     services.post_system_message(conv.id, "video.call.ended:0")
     services.post_message(
