@@ -34,7 +34,7 @@ from .dto import (
                         "type": "string",
                         "description": (
                             "Attachment type from the OPEN registry — image / "
-                            "gif / video / voice / file out of the box, plus "
+                            "gif / video / audio / file out of the box, plus "
                             "whatever STAPEL_CHAT['ATTACHMENT_TYPES'] adds."
                         ),
                     },

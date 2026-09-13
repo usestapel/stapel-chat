@@ -16,7 +16,7 @@ def main(argv=None):
     #   CHAT_KINDS            (list) — which conversation kinds are offered
     #   ATTACHMENTS           (bool) — whether messages may carry attachments
     #   MAX_BODY_LENGTH       (int)  — hard cap on a text body
-    #   ATTACHMENT_TYPES      (open registry) — image/gif/video/voice/file +
+    #   ATTACHMENT_TYPES      (open registry) — image/gif/video/audio/file +
     #                                 whatever the host adds (stickers)
     #   ACTIVITY_STATES       (open registry) — typing/recording/uploading + …
     #   ATTACHMENT_METADATA   (enum) — cdn.describe, or trust the client

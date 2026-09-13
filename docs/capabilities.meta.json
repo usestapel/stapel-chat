@@ -47,7 +47,7 @@
     {
       "name": "ATTACHMENT_TYPES",
       "kind": "merge_registry",
-      "summary": "The OPEN attachment-type registry — builtins (image, gif, video, voice, file) merged under the setting and then under register_attachment_type(), later wins, None removes. Stickers are the named next type: adding one is a settings line, not a contract change."
+      "summary": "The OPEN attachment-type registry — builtins (image, gif, video, audio, file) merged under the setting and then under register_attachment_type(), later wins, None removes. Stickers are the named next type: adding one is a settings line, not a contract change."
     },
     {
       "name": "ACTIVITY_STATES",
