@@ -275,6 +275,9 @@ def last_message_to_dto(
         )
         attachments = msg.attachments
     deleted = deleted_at is not None
+    attachment_types, attachment_count = services.last_line_attachments(
+        attachments=attachments, deleted=deleted
+    )
     return LastMessageResponse(
         seq=int(seq),
         kind=kind,
@@ -289,6 +292,8 @@ def last_message_to_dto(
             deleted=deleted,
             has_attachments=bool(attachments),
         ),
+        attachment_types=list(attachment_types),
+        attachment_count=attachment_count,
     )
 
 

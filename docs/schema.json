@@ -1011,7 +1011,7 @@
       },
       "LastMessageResponse": {
         "type": "object",
-        "description": "The one line an inbox row draws under the title.\n\nA projection, not a message: enough to PAINT the row, and deliberately not\nenough to stand in for the thread (no id, no attachments, no revision\ncursor — a client that wants those opens the conversation). It is annotated\nfor a whole page in the same query the list already costs, because the\nalternative a client is otherwise driven to — ``GET /messages?limit=1`` per\nrow — is fifty requests for a fifty-row inbox.",
+        "description": "The one line an inbox row draws under the title.\n\nA projection, not a message: enough to PAINT the row, and deliberately not\nenough to stand in for the thread (no id, no attachment DESCRIPTORS — only\ntheir types and how many — no revision cursor; a client that wants those\nopens the conversation). It is annotated\nfor a whole page in the same query the list already costs, because the\nalternative a client is otherwise driven to — ``GET /messages?limit=1`` per\nrow — is fifty requests for a fifty-row inbox.",
         "properties": {
           "seq": {
             "type": "integer",
@@ -1040,6 +1040,17 @@
             "type": "string",
             "nullable": true,
             "description": "Which of the three ``null`` cases this is, or"
+          },
+          "attachment_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The DISTINCT attachment types the last message"
+          },
+          "attachment_count": {
+            "type": "integer",
+            "description": "How many attachments that message carries — the"
           }
         },
         "required": [

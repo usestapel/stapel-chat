@@ -4,6 +4,48 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-09-14
+
+### Added — an inbox row can say WHICH kind of attachment, not just "some"
+
+`LastMessageResponse` carried `preview_reason: "attachment"` and nothing else
+about the file on the last line, so an inbox had exactly one mark to draw and
+drew it for a photo, a voice note and a PDF alike. The row that says the most
+at a glance in every messenger people actually use said the least here.
+
+Two fields, on the same projection and from the same query:
+
+- **`attachment_types`** — the DISTINCT types the last message carries, **in
+  order of appearance**: `image` / `gif` / `video` / `audio` / `file`, or any
+  type this deployment registered. Distinct, because two photos are one kind
+  of row; in order of appearance, because the first icon should be the
+  attachment the bubble leads with. The registry is OPEN
+  (`stapel_chat.attachments`), so this is **not an enum** — a client maps the
+  names it knows and falls back to its generic mark for the rest.
+- **`attachment_count`** — how many attachments, the TOTAL and not the number
+  of distinct types, because that is what a `+N` drawn next to two icons has
+  to be counting.
+
+Both are read from the message's **own stored descriptors**
+(`services.last_line_attachments`, over the `last_message_attachments`
+annotation `with_last_message` has carried since 0.8.3). There is no CDN call
+and there must not be one: `describe_attachments` per row would put back the
+fifty requests for a fifty-row inbox that this whole projection exists to
+delete, and an inbox has to paint on deployments where the CDN is unreachable.
+A test registers a `cdn.describe_many` provider, clears its call log after the
+send, and asserts drawing the row calls it zero times.
+
+A **tombstone draws neither** — empty types, count `0` — and the rule honours
+the deletion flag rather than trusting the stored list to be empty: rows
+deleted before tombstones cleared `attachments` are in live databases, and a
+withdrawn message announcing "and it had three photos" on the one surface its
+sender was taking it off is the single failure this projection must not have.
+
+Additive and defaulted, so an older client sees fields it ignores. `docs/`
+regenerated: `schema.json` gains the two properties (neither required),
+`capabilities.json` one surface entry (38 → 39), and the `llms.txt` ceiling
+moves 7800 → 8000 for it (see the Makefile note).
+
 ## [0.9.3] — 2026-09-14
 
 ### Fixed — the conversation-delete release was published before the delete

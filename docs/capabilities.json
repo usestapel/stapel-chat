@@ -1,6 +1,6 @@
 {
   "module": "stapel-chat",
-  "version": "0.9.3",
+  "version": "0.10.0",
   "provides": "Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; leaving a thread, which hides it for the person who left and takes nothing away from anybody else (their messages, the other party's copy and their own history by id all stay), un-hides on the next message written there, and is undoable (the left threads are listed by ?left=true and put back by POST /conversations/{id}/rejoin, which clears the departure and nothing else); and a support layer (queue, first-come assignment, open/pending/resolved with reopen).",
   "axes": [
     {
@@ -403,6 +403,15 @@
       "kind": "factory",
       "path": "stapel_chat.services.journal_rows",
       "intent": "The replay source a resuming socket reads: rows past the client's cursor by REVISION sequence. Filtering on the message's own seq is the bug this exists to prevent — it silently drops every edit and tombstone that happened while the client was away."
+    },
+    {
+      "name": "last_line_attachments",
+      "kind": "gate_function",
+      "path": "stapel_chat.services.last_line_attachments",
+      "intent": "The (types, count) an inbox row draws for its last line's attachments — distinct types in order of appearance, total count, empty for a tombstone. preview_reason: attachment says a file rather than words and never WHICH, so a row drew one generic clip for a photo, a voice note and a PDF alike. Read from the message's OWN stored descriptors: describing them again is a CDN call per row.",
+      "instead_of": [
+        "stapel_chat.attachments.describe_attachments"
+      ]
     },
     {
       "name": "last_line_reason",

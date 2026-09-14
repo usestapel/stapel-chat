@@ -826,13 +826,15 @@ paints under its title:
 "last_message": {
   "seq": 42, "kind": "text",
   "sender_id": "…", "created_at": "…",
-  "body_preview": "Is the bicycle still there?"
+  "body_preview": "Is the bicycle still there?",
+  "preview_reason": null,
+  "attachment_types": [], "attachment_count": 0
 }
 ```
 
-A projection, not a message: no id, no attachments, no `rev_seq`. A client that
-wants those opens the thread. `null` means nobody has written in the thread
-yet.
+A projection, not a message: no id, no attachment *descriptors*, no `rev_seq`.
+A client that wants those opens the thread. `null` means nobody has written in
+the thread yet.
 
 **`body_preview` is what the row DRAWS** — plain, one line, at most 140
 characters — and it is `null` in exactly the three cases the search excludes,
@@ -846,6 +848,23 @@ because both read one function (`services.drawn_last_line`):
   `{"video.call.ended": "Call ended"}` makes that row draw *Call ended* **and**
   makes "call ended" find it, in one move. `kind` says which case a `null` is,
   so a client can render its own phrase instead of guessing.
+
+**Which kind of attachment, not just "some" (0.10.0).** `preview_reason:
+"attachment"` says the last line is a file rather than words and says nothing
+about *which*, so an inbox drew one generic clip for a photo, a voice note and
+a PDF alike. `attachment_types` is the **distinct** types **in order of
+appearance** (`image` / `gif` / `video` / `audio` / `file`, or anything this
+deployment registered) and `attachment_count` is the **total** — the number a
+`+N` next to two icons has to be counting. Both come from the message's own
+stored descriptors, in the query the page already runs
+(`services.last_line_attachments`, off `last_message_attachments`): describing
+them again would be a `cdn.describe_many` per row, which is the cost this whole
+projection exists to delete, and the inbox has to paint on deployments where
+the CDN is not reachable at all. The type registry is **open**, so this is not
+an enum — a client maps the names it knows and falls back to its generic mark
+for the rest. A **tombstone draws neither**: the arrays are empty and the count
+is `0`, so a withdrawn message never announces "and it had three photos" on the
+one surface its sender was taking it off.
 
 The last line is the thread's **newest message by `seq`** — never the row at
 `Conversation.last_seq`, which is the trap: that counter is shared with the

@@ -1400,6 +1400,64 @@ def last_line_reason(
     return None
 
 
+def last_line_attachments(
+    *, attachments, deleted: bool
+) -> tuple[tuple[str, ...], int]:
+    """The marks an inbox row draws for its last line: ``(types, count)``.
+
+    ``preview_reason: "attachment"`` says the last line is a file rather than
+    words, and says nothing about WHICH — so an inbox draws one generic clip
+    for a photo, a voice note and a PDF alike, and the row that says the most
+    at a glance in every messenger people actually use says the least here.
+    This is the same projection discipline as :func:`drawn_last_line`: enough
+    to PAINT the row, never enough to stand in for the thread.
+
+    ``types`` is the DISTINCT types **in order of appearance** — ``image`` /
+    ``gif`` / ``video`` / ``audio`` / ``file``, or whatever else this
+    deployment registered (:mod:`stapel_chat.attachments` is an open
+    registry, so this list is not an enum and a client must fall back rather
+    than switch exhaustively). Order of appearance and not sorted: the first
+    attachment is the one the bubble leads with, so the first icon on the row
+    is the one the reader is about to see. Distinct, because six photos are
+    one kind of row and the *number* of them is `count`'s job.
+
+    ``count`` is how many attachments the message carries — the total, not the
+    number of distinct types, which is what a ``+N`` next to two icons has to
+    be counting.
+
+    Read from the message's OWN stored descriptors. There is no CDN call here
+    and there must never be one: the list annotates a whole page in the query
+    it already runs (:func:`with_last_message` carries
+    ``last_message_attachments`` for exactly this), and a describe per row
+    would put the fifty requests back that this whole projection exists to
+    delete. A `type` is stamped at store time by
+    :func:`~stapel_chat.attachments.normalize_attachment`, so nothing here
+    re-derives one; the bare-string and missing-type shapes are still read as
+    ``file`` because pre-0.3 rows are in live databases.
+
+    A TOMBSTONE draws nothing. `delete_message` empties the list, so the
+    stored descriptors already say so — the flag is honoured anyway because a
+    withdrawn message leaking "and it had 3 photos" is the one failure this
+    projection must not have, and rows deleted before tombstones emptied
+    attachments are in the same live databases.
+    """
+    if deleted or not attachments:
+        return (), 0
+    types: list[str] = []
+    count = 0
+    for raw in attachments:
+        count += 1
+        if isinstance(raw, str):
+            kind = "file"
+        elif isinstance(raw, dict):
+            kind = raw.get("type") or "file"
+        else:
+            kind = "file"
+        if kind not in types:
+            types.append(kind)
+    return tuple(types), count
+
+
 def preview_of(text: str | None) -> str | None:
     """``text`` as a single plain line of at most :data:`PREVIEW_MAX_CHARS`."""
     if not text:

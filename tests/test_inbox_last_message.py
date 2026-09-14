@@ -57,6 +57,8 @@ class TestTheProjection:
             "kind": "text",
             "sender_id": str(other_user.id),
             "created_at": row["last_message"]["created_at"],
+            "attachment_types": [],
+            "attachment_count": 0,
             "body_preview": "Is the bicycle still there?",
             "preview_reason": None,
         }
@@ -287,6 +289,191 @@ class TestPreviewReason:
             )
             == "deleted"
         )
+
+
+# ── Which kind of attachment, not just "some" ────────────────────────────
+
+
+class TestAttachmentMarks:
+    """`preview_reason: "attachment"` says the last line is a file rather than
+    words, and nothing about WHICH — so an inbox drew one generic clip for a
+    photo, a voice note and a PDF alike. `attachment_types` /
+    `attachment_count` are the per-type marks, read from the message's own
+    stored descriptors in the query the list already runs.
+    """
+
+    def test_a_photo_row_says_photo(self, auth_client, user, other_user):
+        conv = services.create_direct(owner=user, other_user_id=other_user.id)
+        services.post_message(
+            conversation=conv,
+            sender=other_user,
+            body="",
+            attachments=[{"key": "product/abc", "type": "image"}],
+        )
+
+        last = _row(auth_client, conv)["last_message"]
+        assert last["attachment_types"] == ["image"]
+        assert last["attachment_count"] == 1
+
+    def test_distinct_types_in_order_of_appearance_and_a_total_count(
+        self, auth_client, user, other_user
+    ):
+        """Six attachments, three kinds: three icons and a count of six.
+
+        Distinct, because two photos are one kind of row; in order of
+        appearance, because the first icon should be the attachment the
+        bubble leads with; and the count is the TOTAL, because that is what
+        a `+N` next to the icons has to be counting.
+        """
+        conv = services.create_direct(owner=user, other_user_id=other_user.id)
+        services.post_message(
+            conversation=conv,
+            sender=other_user,
+            body="",
+            attachments=[
+                {"key": "m/1", "type": "video"},
+                {"key": "m/2", "type": "image"},
+                {"key": "m/3", "type": "image"},
+                {"key": "m/4", "type": "file"},
+                {"key": "m/5", "type": "image"},
+                {"key": "m/6", "type": "video"},
+            ],
+        )
+
+        last = _row(auth_client, conv)["last_message"]
+        assert last["attachment_types"] == ["video", "image", "file"]
+        assert last["attachment_count"] == 6
+
+    def test_a_text_row_carries_no_marks(self, auth_client, user, other_user):
+        conv = services.create_direct(owner=user, other_user_id=other_user.id)
+        services.post_message(conversation=conv, sender=other_user, body="hello")
+
+        last = _row(auth_client, conv)["last_message"]
+        assert last["attachment_types"] == []
+        assert last["attachment_count"] == 0
+
+    def test_a_tombstone_draws_no_marks(self, auth_client, user, other_user):
+        """A withdrawn message must not leak "and it had three photos"."""
+        conv = services.create_direct(owner=user, other_user_id=other_user.id)
+        msg = services.post_message(
+            conversation=conv,
+            sender=other_user,
+            body="",
+            attachments=[
+                {"key": "m/1", "type": "image"},
+                {"key": "m/2", "type": "image"},
+                {"key": "m/3", "type": "audio"},
+            ],
+        )
+        services.delete_message(message=msg, actor=other_user)
+
+        last = _row(auth_client, conv)["last_message"]
+        assert last["preview_reason"] == "deleted"
+        assert last["attachment_types"] == []
+        assert last["attachment_count"] == 0
+
+    def test_a_body_with_attachments_carries_both_the_words_and_the_marks(
+        self, auth_client, user, other_user
+    ):
+        """The marks are not an alternative to the preview: a captioned photo
+        draws its caption AND its picture icon, and `preview_reason` stays
+        null because there are words to show."""
+        conv = services.create_direct(owner=user, other_user_id=other_user.id)
+        services.post_message(
+            conversation=conv,
+            sender=other_user,
+            body="here it is",
+            attachments=[{"key": "m/1", "type": "gif"}],
+        )
+
+        last = _row(auth_client, conv)["last_message"]
+        assert last["body_preview"] == "here it is"
+        assert last["preview_reason"] is None
+        assert last["attachment_types"] == ["gif"]
+        assert last["attachment_count"] == 1
+
+    def test_the_single_conversation_read_carries_the_same_marks(
+        self, auth_client, user, other_user
+    ):
+        """The annotated path and the one-query fallback must agree — two
+        rules here would mean a detail header and its own inbox row drawing
+        different icons for the same message."""
+        conv = services.create_direct(owner=user, other_user_id=other_user.id)
+        services.post_message(
+            conversation=conv,
+            sender=other_user,
+            body="",
+            attachments=[
+                {"key": "m/1", "type": "audio"},
+                {"key": "m/2", "type": "file"},
+            ],
+        )
+
+        detail = auth_client.get(f"{LIST}/{conv.id}").json()["last_message"]
+        assert detail == _row(auth_client, conv)["last_message"]
+        assert detail["attachment_types"] == ["audio", "file"]
+        assert detail["attachment_count"] == 2
+
+    def test_the_marks_cost_no_cdn_call(self, auth_client, user, other_user):
+        """Read from the STORED descriptors, never described again. A
+        describe per row would put back the fifty requests this whole
+        projection exists to delete — and the CDN is not even reachable on
+        every deployment that draws an inbox."""
+        from stapel_core.comm import function, function_registry
+
+        calls = []
+        function_registry._providers.pop("cdn.describe_many", None)
+
+        @function("cdn.describe_many")
+        def _describe_many(payload):
+            calls.append(list(payload["refs"]))
+            return {"items": {}, "missing": []}
+
+        try:
+            conv = services.create_direct(owner=user, other_user_id=other_user.id)
+            services.post_message(
+                conversation=conv,
+                sender=other_user,
+                body="",
+                attachments=[{"key": "m/1", "type": "image"}],
+            )
+            calls.clear()  # sending may describe; DRAWING THE ROW may not.
+
+            last = _row(auth_client, conv)["last_message"]
+            assert last["attachment_types"] == ["image"]
+            assert calls == []
+        finally:
+            function_registry._providers.pop("cdn.describe_many", None)
+
+    def test_the_rule_itself(self):
+        rule = services.last_line_attachments
+
+        assert rule(attachments=[], deleted=False) == ((), 0)
+        assert rule(attachments=None, deleted=False) == ((), 0)
+        assert rule(
+            attachments=[{"key": "a", "type": "image"}], deleted=False
+        ) == (("image",), 1)
+        assert rule(
+            attachments=[
+                {"key": "a", "type": "image"},
+                {"key": "b", "type": "image"},
+            ],
+            deleted=False,
+        ) == (("image",), 2)
+        # Deletion wins over whatever the row still stores: rows deleted
+        # before tombstones emptied `attachments` are in live databases.
+        assert rule(
+            attachments=[{"key": "a", "type": "image"}], deleted=True
+        ) == ((), 0)
+        # The pre-0.3 bare-ref shape, and a descriptor with no type, both read
+        # as `file` — the same fallback `normalize_attachment` applies.
+        assert rule(attachments=["product/abc"], deleted=False) == (("file",), 1)
+        assert rule(attachments=[{"key": "a"}], deleted=False) == (("file",), 1)
+        # The registry is OPEN, so a host type travels under its own name
+        # rather than being flattened into `file`.
+        assert rule(
+            attachments=[{"key": "a", "type": "sticker"}], deleted=False
+        ) == (("sticker",), 1)
 
 
 # ── One rule, not two ────────────────────────────────────────────────────

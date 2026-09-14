@@ -216,8 +216,9 @@ class LastMessageResponse:
     """The one line an inbox row draws under the title.
 
     A projection, not a message: enough to PAINT the row, and deliberately not
-    enough to stand in for the thread (no id, no attachments, no revision
-    cursor — a client that wants those opens the conversation). It is annotated
+    enough to stand in for the thread (no id, no attachment DESCRIPTORS — only
+    their types and how many — no revision cursor; a client that wants those
+    opens the conversation). It is annotated
     for a whole page in the same query the list already costs, because the
     alternative a client is otherwise driven to — ``GET /messages?limit=1`` per
     row — is fifty requests for a fifty-row inbox.
@@ -254,6 +255,28 @@ class LastMessageResponse:
             guessing from ``kind`` alone. Decided once, in
             ``services.last_line_reason``, over the same columns
             ``body_preview`` is built from.
+        attachment_types: The DISTINCT attachment types the last message
+            carries, **in order of appearance** — ``image`` / ``gif`` /
+            ``video`` / ``audio`` / ``file``, or any type this deployment
+            registered. Empty for a message with no attachments and for a
+            tombstone. ``preview_reason: "attachment"`` says the line is a
+            file rather than words and not WHICH, so a row drew one generic
+            clip for a photo, a voice note and a PDF alike; this is what lets
+            it draw the picture mark for a picture. The registry is OPEN
+            (:mod:`stapel_chat.attachments`), so this is **not an enum**: a
+            client maps the names it knows and falls back to its generic mark
+            for the rest rather than switching exhaustively. Order of
+            appearance, not sorted — the first icon is the attachment the
+            bubble leads with.
+        attachment_count: How many attachments that message carries — the
+            total, not the number of distinct types, because a ``+N`` drawn
+            next to two icons is counting attachments. ``0`` for a text-only
+            message and for a tombstone.
+
+            Both fields are read from the message's own stored descriptors,
+            in the query the list already runs. Neither costs a CDN call, and
+            a client that wants the descriptors themselves (keys, previews,
+            durations) opens the conversation — this is still a projection.
     """
 
     seq: int
@@ -262,6 +285,8 @@ class LastMessageResponse:
     sender_id: Optional[str] = None
     body_preview: Optional[str] = None
     preview_reason: Optional[str] = None
+    attachment_types: List[str] = field(default_factory=list)
+    attachment_count: int = 0
 
 
 @dataclass

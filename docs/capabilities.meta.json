@@ -154,6 +154,13 @@
         "stapel_chat.models.Message.deleted_at"
       ]
     },
+    "last_line_attachments": {
+      "kind": "gate_function",
+      "intent": "The (types, count) an inbox row draws for its last line's attachments — distinct types in order of appearance, total count, empty for a tombstone. preview_reason: attachment says a file rather than words and never WHICH, so a row drew one generic clip for a photo, a voice note and a PDF alike. Read from the message's OWN stored descriptors: describing them again is a CDN call per row.",
+      "instead_of": [
+        "stapel_chat.attachments.describe_attachments"
+      ]
+    },
     "preview_of": {
       "kind": "factory",
       "intent": "A body as ONE plain line of at most 140 characters — what a row has space for. The whole body is paid for by every row on every page load and rendered by none of them."

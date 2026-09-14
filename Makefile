@@ -116,7 +116,17 @@ PYTHON ?= python3
 # and not NULL — `created_at > NULL` is NULL in SQL, so the obvious
 # implementation hides every message from everybody who never cleared
 # anything. Trim before raising it again.
-LLMS_BUDGET ?= 7800
+# Raised again in 0.10.0, from 7800, by 200: an inbox row now says WHICH kinds
+# of attachment its last line carries, which is one surface entry whose whole
+# content is two rules an agent gets wrong on its own. First, that it reads the
+# message's OWN stored descriptors — an agent that reads only "the row needs
+# attachment types" reaches for `describe_attachments`, which is a CDN call per
+# row and puts back the fifty requests `last_message` exists to delete. Second,
+# that a TOMBSTONE draws nothing: the obvious implementation reads the stored
+# list, and rows deleted before tombstones emptied it are in live databases, so
+# a withdrawn message announces "and it had three photos" on the one surface
+# the sender was trying to take it off. Trim before raising it again.
+LLMS_BUDGET ?= 8000
 
 .PHONY: contract contract-check
 
