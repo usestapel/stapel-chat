@@ -68,6 +68,10 @@ class ChatGDPRProvider(GDPRProvider):
             id__in=conv_ids, kind=ConversationKind.DIRECT
         ):
             if conv.participants.count() < 2:
+                # The cascade takes messages nobody erased — the counterparty's
+                # — with it. Their CDN claims have to be released first or the
+                # media is pinned by an entity that no longer exists.
+                services._release_conversation_cdn_refs(conv.pk)
                 conv.delete()
 
     def anonymize(self, user_id) -> None:

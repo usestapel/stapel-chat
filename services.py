@@ -64,6 +64,105 @@ logger = logging.getLogger(__name__)
 _MAX_SEQ_RETRIES = 8
 
 
+# ── CDN reference claims ────────────────────────────────────────────────
+#
+# stapel-cdn is a reference counter with a collector attached: an upload is
+# stamped `unreferenced_since` and its sweeper reaps anything still zero-ref
+# after `UNCLAIMED_TTL_HOURS` — bytes and row, unrecoverably. A module that
+# stores a CDN ref without claiming it is handing its users a lease.
+#
+# The module that owns the entity claims and releases it. For chat that is
+# here, entity `chat/message/<uuid>`, hashes = every attachment `key`.
+# Same mechanism listings and profiles use: an event on the ref-sync topic,
+# applied asynchronously by the CDN's consumer, so a CDN that is down catches
+# up from the broker rather than costing a chat message its send.
+
+#: `apply_ref_sync` builds its ref key as `<service>/<entity_type>/<entity_id>`,
+#: so these two strings ARE the identity of a chat claim on the CDN side —
+#: renaming either orphans every ref already written under the old name.
+CDN_SERVICE = "chat"
+CDN_ENTITY_TYPE = "message"
+
+
+def _message_cdn_refs(attachments) -> set[str]:
+    """The ``<type>/<hash>`` references an attachment list claims.
+
+    Tolerates the pre-0.3 bare-string attachment form the same way
+    :func:`~stapel_chat.attachments.normalize_attachment` does, because the
+    backfill reads rows this module wrote before that normalization existed.
+    """
+    refs: set[str] = set()
+    for item in attachments or []:
+        key = item if isinstance(item, str) else (
+            item.get("key") if isinstance(item, dict) else None
+        )
+        if isinstance(key, str) and key.strip():
+            refs.add(key.strip())
+    return refs
+
+
+def _sync_message_cdn_refs(message_id, old_refs: set[str], new_refs: set[str]) -> None:
+    """Announce one message's claim change to stapel-cdn. Never raises.
+
+    Graceful for the same reason listings' sync is: the helper already
+    degrades a failed publish to ``ok=False`` and a warning (the broker
+    replays when the CDN catches up), and anything it raises anyway is logged
+    here — a chat message must not fail over media bookkeeping.
+    """
+    if old_refs == new_refs:
+        return
+    try:
+        from stapel_core.django.cdn.ref_sync import sync_cdn_refs
+
+        sync_cdn_refs(
+            CDN_SERVICE,
+            CDN_ENTITY_TYPE,
+            str(message_id),
+            sorted(old_refs),
+            sorted(new_refs),
+        )
+    except Exception:
+        logger.warning(
+            "CDN ref sync failed for chat message %s", message_id, exc_info=True
+        )
+
+
+def _schedule_message_cdn_ref_sync(message_id, old_refs, new_refs) -> None:
+    """Publish the claim change **after the row commits**, never under the
+    conversation lock.
+
+    The send path allocates ``seq`` under ``select_for_update`` on the
+    conversation row; a broker round trip inside that section would serialize
+    every sender in the thread behind the slowest publish. ``on_commit`` is
+    also the only point at which the claim is true: a rolled-back send (a seq
+    collision, a retry) must leave the CDN's counter untouched.
+    """
+    old_refs, new_refs = set(old_refs or ()), set(new_refs or ())
+    if old_refs == new_refs:
+        return
+    transaction.on_commit(
+        lambda: _sync_message_cdn_refs(message_id, old_refs, new_refs)
+    )
+
+
+def _release_conversation_cdn_refs(conversation_id) -> None:
+    """Release the claims of every message a conversation delete will cascade.
+
+    The two paths that actually remove a conversation row (GDPR's dead-direct
+    cleanup, and the user-merge fold of a thread with only one person left in
+    it) take their messages with them. Without this the refs of those rows —
+    *including the counterparty's*, who erased nothing — stay claimed by an
+    entity that no longer exists, and the sweeper can never reap them — the
+    mirror image of the defect this section closes.
+
+    Call it BEFORE the delete; the rows have to be readable.
+    """
+    for message_id, attachments in Message.objects.filter(
+        conversation_id=conversation_id
+    ).values_list("id", "attachments"):
+        _schedule_message_cdn_ref_sync(message_id, _message_cdn_refs(attachments), set())
+
+
 class ChatError(Exception):
     """Base for service-layer refusals mapped to error responses by views."""
 
@@ -556,6 +655,10 @@ def _post_once(
         _resurface_participants(conv, sender)
         emit("chat.message", _message_payload(msg, conv), key=str(conv.pk))
         _schedule_fanout(msg, conv)
+        # Claim the media this message points at, or stapel-cdn's sweeper
+        # reaps it out from under the thread once its unclaimed TTL runs out.
+        # Scheduled, not called: the conversation row is locked right here.
+        _schedule_message_cdn_ref_sync(msg.id, set(), _message_cdn_refs(attachments))
     return msg
 
 
@@ -949,6 +1052,8 @@ def delete_message(*, message: Message, actor, hard: bool = False) -> Message:
 
     with mutate_and_emit() as emit:
         conv, rev = _allocate_seq(message.conversation_id)
+        # Read the claim before the tombstone empties the list.
+        released = _message_cdn_refs(message.attachments)
         message.body = ""
         message.attachments = []
         message.deleted_at = timezone.now()
@@ -971,6 +1076,9 @@ def delete_message(*, message: Message, actor, hard: bool = False) -> Message:
             key=str(conv.pk),
         )
         _schedule_fanout(message, conv)
+        # The attachments are gone from the row, so the claim goes too: the
+        # tombstone is what puts this media back on the sweeper's clock.
+        _schedule_message_cdn_ref_sync(message.id, released, set())
     return message
 
 
@@ -1018,6 +1126,10 @@ def erase_user_messages(user_id) -> int:
             conv.last_seq = base + len(rows)
             conv.save(update_fields=["last_seq", "updated_at"])
             for offset, msg in enumerate(rows, start=1):
+                # Erasure destroys the content; the claim on the CDN's copy of
+                # it has to go the same way, or the bytes outlive the right
+                # that was exercised over them.
+                released = _message_cdn_refs(msg.attachments)
                 Message.objects.filter(pk=msg.pk).update(
                     body="",
                     attachments=[],
@@ -1030,6 +1142,7 @@ def erase_user_messages(user_id) -> int:
                 msg.sender_id = None
                 msg.deleted_at = now
                 msg.rev_seq = base + offset
+                _schedule_message_cdn_ref_sync(msg.id, released, set())
             recipients = _participant_ids(conv)
             for msg in rows:
                 transaction.on_commit(

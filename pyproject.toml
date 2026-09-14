@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-chat"
-version = "0.9.1"
+version = "0.9.2"
 description = "Conversations, messaging and support chat for the Stapel framework"
 readme = "README.md"
 license = { text = "MIT" }
@@ -84,7 +84,12 @@ test = [
 
 [tool.setuptools]
 package-dir = {"stapel_chat" = "."}
-packages = ["stapel_chat", "stapel_chat.migrations"]
+packages = [
+    "stapel_chat",
+    "stapel_chat.migrations",
+    "stapel_chat.management",
+    "stapel_chat.management.commands",
+]
 
 [tool.setuptools.package-data]
 stapel_chat = ["py.typed", "migrations/*.py", "schemas/**/*.json", "docs/capabilities.json", "docs/llms.txt", "docs/flows.json", "docs/errors.json", "CONFIG.MD"]

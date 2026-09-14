@@ -284,6 +284,44 @@ broken image in every consumer) and again here by `MAX_PREVIEW_B64_BYTES`,
 which matches it deliberately. `MAX_ATTACHMENTS` × that is the per-message
 preview weight a client pays for.
 
+**Claiming, and why it is not optional (0.9.2).** The CDN is a reference
+counter with a collector attached: an upload is stamped `unreferenced_since`
+and `sweep_unclaimed` reaps anything still zero-ref after
+`UNCLAIMED_TTL_HOURS` — the blob *and* the row. Storing a ref is therefore not
+keeping a file; until 0.9.2 every chat attachment was a lease with the TTL on
+it. **The module that owns the entity claims and releases it**, so chat does,
+under entity `chat/message/<uuid>` with every attachment `key` as a hash, via
+`sync_cdn_refs` on the `stapel.cdn.ref-sync` topic the CDN's consumer already
+reads (`manage.py consume_cdn_events`).
+
+| Path | Claim |
+|---|---|
+| `post_message` | claims every ref, scheduled `on_commit` — never under the conversation lock, never for a send that rolled back |
+| `delete_message` | releases: the tombstone empties `attachments` |
+| `erase_user_messages` (GDPR) | releases — the bytes must not outlive the right exercised over them |
+| a conversation delete (GDPR dead-direct, user-merge fold) | releases first: the cascade takes messages *nobody erased*, whose refs would otherwise be claimed by an entity that no longer exists |
+| **`clear_conversation`** | **releases nothing.** A per-viewer cursor, not a deletion — the counterparty is still served the message, and releasing here reaps *their* media. A test pins this. |
+
+Not an HTTP claim from the browser: `refs/sync/` is `IsServiceRequest` and
+cdn-react declines to wrap it on purpose — a client that may assert a
+reference may pin any hash forever, and no browser is present at a tombstone
+or an erasure. Not a claim at upload time either: the composer uploads before
+the message exists.
+
+Rows written before 0.9.2 announce nothing of their own (nothing about them
+changes), so they need one pass:
+
+```
+manage.py chat_backfill_cdn_refs [--limit N] [--dry-run]
+```
+
+Additive by construction — every event carries `old_hashes=[]`, so
+`apply_ref_sync`'s removal set is empty and a rerun adds nothing and releases
+nothing. Tombstones are skipped: `deleted_at` means the refs were released
+deliberately. A failed publish is counted, not raised. Check the result with
+the CDN's own diagnostic, `manage.py cdn_sweep_unclaimed --dry-run`, not with
+arithmetic on `unreferenced_since`.
+
 ### 7. Moderation — one target type, registered into a gap (`moderation.py`)
 
 stapel-moderation is target-generic: its target registry ships EMPTY and it

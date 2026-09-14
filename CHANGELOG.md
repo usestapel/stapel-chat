@@ -4,6 +4,60 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] — 2026-09-14
+
+### Fixed — chat attachments were a 48-hour lease
+
+stapel-chat stored CDN refs and never claimed them. stapel-cdn is a reference
+counter with a collector attached: an upload is stamped `unreferenced_since`,
+and `sweep_unclaimed` reaps anything still zero-ref after
+`UNCLAIMED_TTL_HOURS` — the blob AND the row, unrecoverably. Listings and
+profiles have always claimed through
+`stapel_core.django.cdn.ref_sync.sync_cdn_refs`; this module never did, so
+every photo and voice note a user sent was live only until the next sweep
+after its TTL. Measured on a live deployment, not inferred: `grep -rn
+apply_ref` in the installed package returned nothing, and the CDN's own
+`cdn_sweep_unclaimed --dry-run` listed real chat media among its candidates.
+
+The module that owns the entity claims and releases it, so the claim lives
+here — entity `chat/message/<uuid>`, hashes taken from every attachment
+`key`, published on the `stapel.cdn.ref-sync` topic the CDN's consumer
+already reads. Not an HTTP claim from the browser: a client that may assert a
+reference may pin any hash forever, and no browser is present at a tombstone
+or a GDPR erasure.
+
+- **Claimed on send** (`_post_once`), scheduled `on_commit` — never inside the
+  conversation lock, where a broker round trip would serialize every sender in
+  the thread, and never for a send that rolled back on a seq collision.
+- **Released on the tombstone** (`delete_message`) and on **erasure**
+  (`erase_user_messages`): the attachments leave the row, so the claim goes
+  with them. Erasure that left the media claimed would keep the bytes alive
+  past the right that was exercised over them.
+- **Released before a conversation delete cascades** (GDPR's dead-direct
+  cleanup, and the user-merge fold of a thread down to one participant). Those
+  cascades take messages *nobody erased* — the counterparty's — and their refs
+  would have stayed claimed by an entity that no longer exists, which is the
+  mirror defect: media no sweeper can ever reap.
+- **`clear_conversation` releases nothing, and a test says so.** It is a
+  per-viewer cursor (`cleared_at`), not a deletion: the other party is still
+  being served the message, and releasing there would reap their media.
+
+### Added — `manage.py chat_backfill_cdn_refs [--limit N] [--dry-run]`
+
+Messages already in the table announce no claim of their own — nothing about
+them changes — so they stay zero-ref and on the sweeper's clock. The command
+publishes an ADDITIVE claim (`old_hashes=[]`) for every live message that
+carries refs: idempotent and rerunnable by construction, since `apply_ref_sync`
+derives its removals from the old set and this one is always empty. Tombstones
+are skipped — `deleted_at` means the refs were released deliberately. A failed
+publish is counted, not raised; rerun once the broker is reachable. Verify with
+the CDN's own diagnostic, `manage.py cdn_sweep_unclaimed --dry-run`, rather
+than by arithmetic on `unreferenced_since`.
+
+`[tool.setuptools].packages` now lists `stapel_chat.management[.commands]`: a
+command missing from the wheel exists in the source tree and in nobody's
+install, and it is the operator on the stand who has to run this one.
+
 ## [0.9.1] — 2026-09-14
 
 ### Fixed — the schema said `voice`; the registry has said `audio` since 0.3.1

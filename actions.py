@@ -201,7 +201,11 @@ def _requalify_direct_key(conv) -> None:
     if len(user_ids) < 2:
         # Both sides of this direct thread turned out to be the same person
         # (the guest had a thread with the very account they merged into).
-        # A thread with yourself is dead — same rule the GDPR path applies.
+        # A thread with yourself is dead — same rule the GDPR path applies,
+        # including the release of the CDN claims the cascade would strand.
+        from . import services
+
+        services._release_conversation_cdn_refs(conv.pk)
         conv.delete()
         return
 
