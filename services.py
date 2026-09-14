@@ -145,22 +145,34 @@ def _schedule_message_cdn_ref_sync(message_id, old_refs, new_refs) -> None:
     )
 
 
-def _release_conversation_cdn_refs(conversation_id) -> None:
-    """Release the claims of every message a conversation delete will cascade.
+def _delete_conversation_row(conversation) -> None:
+    """Delete a conversation row, releasing the CDN claims its cascade strands.
 
-    The two paths that actually remove a conversation row (GDPR's dead-direct
-    cleanup, and the user-merge fold of a thread with only one person left in
-    it) take their messages with them. Without this the refs of those rows —
+    The two paths that actually remove a conversation (GDPR's dead-direct
+    cleanup, and the user-merge fold of a thread down to one participant) take
+    their messages with them. Without the release, the refs of those rows —
     *including the counterparty's*, who erased nothing — stay claimed by an
-    entity that no longer exists, and the sweeper can never reap them — the
-    mirror image of the defect this section closes.
+    entity that no longer exists and no sweeper can ever reap them: the mirror
+    image of the defect this section closes.
 
-    Call it BEFORE the delete; the rows have to be readable.
+    **The order is the point, and it is why this is one function rather than a
+    release the caller remembers to make.** The claims are read BEFORE the
+    delete (the rows have to be there) and published AFTER it. The GDPR
+    provider runs in no transaction of its own — ``_handle_delete`` calls it
+    bare — so a release published first is published *immediately*, and a
+    delete that then failed would have put media a live message still points
+    at onto the sweeper's clock. That is this very defect, not a smaller
+    version of it.
     """
-    for message_id, attachments in Message.objects.filter(
-        conversation_id=conversation_id
-    ).values_list("id", "attachments"):
-        _schedule_message_cdn_ref_sync(message_id, _message_cdn_refs(attachments), set())
+    claims = [
+        (message_id, _message_cdn_refs(attachments))
+        for message_id, attachments in Message.objects.filter(
+            conversation_id=conversation.pk
+        ).values_list("id", "attachments")
+    ]
+    conversation.delete()
+    for message_id, refs in claims:
+        _schedule_message_cdn_ref_sync(message_id, refs, set())
 
 
 class ChatError(Exception):

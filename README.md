@@ -24,7 +24,7 @@ pip install stapel-chat
 
 | Fact | Value |
 |---|---|
-| Version | `0.9.2` |
+| Version | `0.9.3` |
 | Python | `>=3.11` (3.11, 3.12, 3.13, 3.14) |
 | HTTP operations | 16 |
 | Config axes | 15 |

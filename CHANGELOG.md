@@ -4,6 +4,26 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] — 2026-09-14
+
+### Fixed — the conversation-delete release was published before the delete
+
+0.9.2 released the CDN claims of the messages a conversation delete cascades,
+and released them one statement too early. `GDPRService._handle_delete` calls
+`provider.delete()` in no transaction of its own, so the `on_commit` the
+release is scheduled through fires *immediately* — and a `conv.delete()` that
+then failed would have left every one of those messages alive with its media
+handed to `sweep_unclaimed`. The same defect the release exists to prevent,
+reached by the fix for it.
+
+`services._delete_conversation_row()` now owns both halves: the claims are read
+BEFORE the delete (the rows have to be there) and published AFTER it, so a
+delete that fails changes nothing. It is one function and not a release the two
+callers remember to make in the right order, because the order is the whole
+content of the rule. A test monkeypatches `Conversation.delete` into a failure
+and asserts nothing was released and the message still exists — it fails
+against 0.9.2's ordering, which is the only reason to trust it.
+
 ## [0.9.2] — 2026-09-14
 
 ### Fixed — chat attachments were a 48-hour lease

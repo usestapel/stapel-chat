@@ -225,6 +225,30 @@ class TestReleaseOnErasure:
         assert not Conversation.objects.filter(pk=conv.pk).exists()
         assert ("chat", "message", str(theirs.id), {"audio/h2"}, set()) in capture_sync
 
+    def test_a_delete_that_fails_releases_nothing(
+        self, user, other_user, capture_sync, commit, monkeypatch
+    ):
+        """The release is published AFTER the row goes, never before.
+
+        The GDPR provider runs in no transaction of its own, so a release
+        published first is published immediately — and a delete that then
+        failed would have handed the sweeper media a live message still points
+        at. That is this defect, not a smaller version of it.
+        """
+        conv = _direct(user, other_user)
+        msg = _post(conv, user, commit, body="mine", attachments=[IMAGE])
+        capture_sync.clear()
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("the cascade failed")
+
+        monkeypatch.setattr(Conversation, "delete", boom)
+        with pytest.raises(RuntimeError):
+            with commit():
+                services._delete_conversation_row(conv)
+        assert capture_sync == [], "released media a surviving message claims"
+        assert Message.objects.filter(pk=msg.pk).exists()
+
 
 class TestClearConversationReleasesNothing:
     """``clear_conversation`` is a per-viewer cursor. Releasing there would

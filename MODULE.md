@@ -299,7 +299,7 @@ reads (`manage.py consume_cdn_events`).
 | `post_message` | claims every ref, scheduled `on_commit` — never under the conversation lock, never for a send that rolled back |
 | `delete_message` | releases: the tombstone empties `attachments` |
 | `erase_user_messages` (GDPR) | releases — the bytes must not outlive the right exercised over them |
-| a conversation delete (GDPR dead-direct, user-merge fold) | releases first: the cascade takes messages *nobody erased*, whose refs would otherwise be claimed by an entity that no longer exists |
+| a conversation delete (GDPR dead-direct, user-merge fold) | releases — the cascade takes messages *nobody erased*, whose refs would otherwise be claimed by an entity that no longer exists. Claims are read before the delete and published **after** it (`_delete_conversation_row`): the GDPR provider runs in no transaction of its own, so a release published first is published immediately, and a delete that then failed would hand the sweeper media a live message still points at |
 | **`clear_conversation`** | **releases nothing.** A per-viewer cursor, not a deletion — the counterparty is still served the message, and releasing here reaps *their* media. A test pins this. |
 
 Not an HTTP claim from the browser: `refs/sync/` is `IsServiceRequest` and

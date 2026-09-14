@@ -205,8 +205,7 @@ def _requalify_direct_key(conv) -> None:
         # including the release of the CDN claims the cascade would strand.
         from . import services
 
-        services._release_conversation_cdn_refs(conv.pk)
-        conv.delete()
+        services._delete_conversation_row(conv)
         return
 
     key = _direct_key(
