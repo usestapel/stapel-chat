@@ -141,7 +141,9 @@ def _seams():
     from stapel_chat.subjects import register_subject_type, reset_subject_types
 
     reset_subject_types()
-    previous = function_registry._providers.pop(CARD_FUNCTION, None)
+    # Displaced, not saved: the registry ships this function empty on purpose
+    # and every test that wants it registers its own provider.
+    function_registry._providers.pop(CARD_FUNCTION, None)
     function_registry._schemas.pop(CARD_FUNCTION, None)
 
     def cards(payload):
