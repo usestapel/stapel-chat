@@ -4,6 +4,27 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] — 2026-09-18
+
+### Fixed — the history page declared a string anchor and sent an integer
+
+`PaginatedMessageResponseList.next_anchor` / `prev_anchor` were declared
+`string` (nullable) while `MessageHistoryPagination` anchors on `seq`, an
+integer field, so every page with a neighbour answered a number. A generated
+client believed `string | null` for every conversation longer than one page.
+
+The envelope's schema comes from the shared `AnchorPagination`, and
+stapel-core 0.75.0 declares the anchor as the union the paginator can send —
+string or integer. `docs/` is re-emitted against 0.84.0 and the single
+`KNOWN_MISMATCHES` entry in `tests/test_contract_wire.py` is deleted: the dict
+is empty and every driven operation answers the body it declares, in both
+states.
+
+### Changed
+- **`stapel-core>=0.45.0` → `>=0.84.0`.** The emitted contract is the floor: on
+  an older core this wheel ships a document that types an integer anchor as a
+  string.
+
 ## [0.10.0] — 2026-09-14
 
 ### Added — an inbox row can say WHICH kind of attachment, not just "some"

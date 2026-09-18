@@ -59,9 +59,10 @@ second time in their emptiest state, 1 red:
   anchor went unnoticed. A generated client types ``next_anchor`` as
   ``string | null`` and hands ``7`` back as the ``anchor`` query parameter,
   which happens to work: nothing fails loudly, TypeScript simply believes a
-  lie about every conversation longer than one page. This is the SAME defect
-  stapel-recordings carries on its own ``seq`` anchor, found in the same
-  sweep — one shared paginator, two callers that anchor on an int.
+  lie about every conversation longer than one page. stapel-core 0.75.0
+  declares the anchor as the union the paginator can send — string or
+  integer — so with the floor on that core the document is honest and the
+  entry is deleted: ``KNOWN_MISMATCHES`` is empty.
 
 Everything else held, including every ``nullable`` field of
 ``ConversationResponse``, ``MessageResponse``, ``ParticipantResponse``,
@@ -656,36 +657,12 @@ def _reopen_untouched(call):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-_SEQ_ANCHOR = (
-    "PaginatedMessageResponseList.next_anchor/prev_anchor are declared "
-    "`string` (nullable) and the wire sends an INTEGER on every page that has "
-    "a neighbour. MessageHistoryPagination.anchor_field is `seq` "
-    "(views.py:101-111), an IntegerField on Message, and "
-    "AnchorPagination.get_paginated_response copies the raw field value into "
-    "the envelope, stringifying only values that carry `.isoformat()` — which "
-    "an int never does. The module's three OTHER paginators all anchor on a "
-    "datetime (updated_at, created_at, viewer_left_at), where that branch "
-    "fires and the same declaration is true, which is why the one int anchor "
-    "went unnoticed. OWNER: this module's MessageHistoryPagination — the "
-    "envelope's schema comes from the shared "
-    "AnchorPagination.get_paginated_response_schema (stapel-core "
-    "django/api/pagination.py:300-331), which hardcodes `type: string` and is "
-    "honest for every datetime-anchored caller; the int anchor is this "
-    "module's choice. stapel-recordings carries the identical defect on its "
-    "own `seq` anchor — one shared paginator, two callers that anchor on an "
-    "int — so a fix in core's schema (deriving the anchor type from the "
-    "field) would close both. The EMPTY state of this operation is honest and "
-    "is driven separately."
-)
-
 #: Operations whose declared body the POPULATED wire does not send.
 #:
 #: An entry names the defect AND its owner, and ``strict=True`` turns a fixed
 #: one into a failure until the entry is deleted, so a finding can be neither
 #: forgotten nor quietly kept.
-KNOWN_MISMATCHES = {
-    ("GET", V1 + "/conversations/{conversation_id}/messages"): _SEQ_ANCHOR,
-}
+KNOWN_MISMATCHES: dict[tuple[str, str], str] = {}
 
 #: The same, for the EMPTY-state pass. Separate on purpose: a defect can live
 #: in one state and not the other, and marking both xfail would hide a claim

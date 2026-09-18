@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-chat"
-version = "0.10.0"
+version = "0.10.1"
 description = "Conversations, messaging and support chat for the Stapel framework"
 readme = "README.md"
 license = { text = "MIT" }
@@ -32,7 +32,7 @@ dependencies = [
     # the reason this is a floor and not a preference: a deployment running
     # chat's block enforcement against a peer on <=0.44.2 has two halves of
     # the fleet disagreeing about who is verified.
-    "stapel-core>=0.45.0,<1.0",
+    "stapel-core>=0.84.0,<1.0",
     # The WebSocket substrate. Not an extra: since 0.3.0 realtime is the
     # canonical path, and chat's stream keys, wire envelope and consumers are
     # all stapel-realtime's. Importing it costs nothing without Channels.
