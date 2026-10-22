@@ -130,6 +130,7 @@ def handle_user_merged(event):
                 f"its projection has landed"
             )
 
+        _release_colliding_client_ids(from_user_id, into_user_id)
         moved_messages = Message.objects.filter(sender_id=from_user_id).update(
             sender_id=into_user_id
         )
@@ -154,6 +155,43 @@ def handle_user_merged(event):
     )
 
 
+def _revoke_on_commit(conversation_id, user_id) -> None:
+    from django.db import transaction
+
+    from . import realtime
+
+    transaction.on_commit(
+        lambda: realtime.revoke_participant(
+            conversation_id, user_id, reason="removed_from_conversation"
+        )
+    )
+
+
+def _release_colliding_client_ids(from_user_id, into_user_id) -> None:
+    """Blank the guest's send-idempotency keys the survivor already used in
+    the same thread. The key is unique per (conversation, sender), so moving
+    the guest's messages onto the survivor must not make two of them share
+    one; the key only ever deduplicated a retry, which is long over."""
+    from .models import Message
+
+    taken = set(
+        Message.objects.filter(sender_id=into_user_id)
+        .exclude(client_msg_id="")
+        .values_list("conversation_id", "client_msg_id")
+    )
+    if not taken:
+        return
+    clashing = [
+        pk
+        for pk, conv_id, client_id in Message.objects.filter(sender_id=from_user_id)
+        .exclude(client_msg_id="")
+        .values_list("pk", "conversation_id", "client_msg_id")
+        if (conv_id, client_id) in taken
+    ]
+    if clashing:
+        Message.objects.filter(pk__in=clashing).update(client_msg_id="")
+
+
 def _merge_participations(from_user_id, into_user_id) -> None:
     """Move the guest's memberships onto the survivor, folding where both sat
     in the same thread. ``chat_participant_uniq`` forbids two rows for one
@@ -170,6 +208,10 @@ def _merge_participations(from_user_id, into_user_id) -> None:
             guest.user_id = into_user_id
             guest.save(update_fields=["user", "updated_at"])
             survivor_rows[guest.conversation_id] = guest
+            # The row now belongs to someone else: the guest's open socket on
+            # it loses its right like any other removal (a deleted row is
+            # revoked by stapel_chat.signals).
+            _revoke_on_commit(guest.conversation_id, from_user_id)
             continue
         # Read markers only ever move forward: fold by max, never by "the
         # merged-away row wins".

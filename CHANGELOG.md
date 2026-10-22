@@ -4,6 +4,55 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-10-22
+
+### Fixed — a removed participant's socket stops writing and listening
+
+Membership was checked only at connect and on `hello`; the six write frames
+(`send`, `edit`, `delete`, `read`, `delivered`, `activity`) never asked again,
+and only leave and GDPR erasure revoked the open subscription. A participant
+removed in the admin, folded away by `user.merged` or deleted with its
+conversation kept receiving live frames and could keep sending until
+reconnect. Now:
+
+- every write frame re-asks membership uncached before it runs
+  (`ChatConsumer.reauthorize_frames`, stapel-realtime 0.2.3), and a removed
+  participant gets `error{code=unauthorized}` and close 4403;
+- deleting a `ConversationParticipant` row by any path revokes the open
+  subscription on commit (`kick{reason=removed_from_conversation}`, close
+  4410), and a guest row reassigned by `user.merged` is revoked too;
+- the substrate re-asks every listening socket every `AUTHORIZE_CACHE_S`.
+
+### Fixed — send idempotency is per sender
+
+The idempotency lookup and the unique constraint keyed `client_msg_id` per
+conversation, so two participants using predictable ids (`tmp-1`, counters)
+collided: the second sender's REST `201` and socket send returned the FIRST
+participant's message, and the second message was lost. The key is now unique
+per (conversation, sender) for authored messages and per conversation for
+system lines. Migration `0008` adds the two new constraints before dropping the
+old one; both are looser than it, so no row is rewritten or deleted. A
+`user.merged` fold blanks a guest key that the survivor already used in the
+same thread before moving the guest's messages.
+
+### Fixed — a malformed write frame answers an error instead of killing the socket
+
+`body: 5`, `attachments: 5`, a non-UUID `message_id` or `reply_to` escaped
+`receive_json` as AttributeError/TypeError/ValidationError and closed the
+socket with no reason. They now answer `error{code=bad_envelope}` naming the
+field, and the socket stays open.
+
+### Fixed — the docs name the substrate's terminal close codes
+
+MODULE.md said `4401`/`4403`/`4404` are terminal. The canon is
+`TERMINAL_CLOSE_CODES` = `4403`, `4404`, `4410`; `4401` means refresh the token
+and reconnect. A client built from the old sentence died at every token expiry
+and kept retrying a revoke. A test pins the docs to the substrate's set.
+
+### Changed
+- **`stapel-realtime>=0.1.2` → `>=0.2.3`** for `reauthorize_frames` and the
+  periodic re-authorization.
+
 ## [0.10.1] — 2026-09-18
 
 ### Fixed — the history page declared a string anchor and sent an integer

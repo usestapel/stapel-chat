@@ -21,6 +21,7 @@ class ChatConfig(AppConfig):
         from . import checks  # noqa: F401
         from . import errors  # noqa: F401
         from . import functions  # noqa: F401
+        from . import signals  # noqa: F401
 
         # Moderation: declare what a "chat message" is to a target-generic
         # queue — but only into a gap. A host that declared the type itself

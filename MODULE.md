@@ -512,10 +512,19 @@ payload's `seq` is the message's place in the thread — the sort key.**
 | `ws/chat/inbox` | `ChatInboxConsumer` | ephemeral (no id in the URL — it comes from the token) |
 
 Auth is the substrate's G14 JWT stack, behind an origin guard. Close codes are
-the substrate's canon: `4401` unauthenticated, `4403` not a participant, `4404`
-unknown stream, `4408` heartbeat timeout, `4410` revoked, `4413` client too
-slow. `4401`/`4403`/`4404` are terminal — do not retry with the same
-credential. Everything else is a normal reconnect.
+the substrate's canon: `4401` unauthenticated, `4403` not a participant (or a
+refused origin, or access lost mid-socket), `4404` unknown stream, `4408`
+heartbeat timeout, `4410` revoked, `4413` client too slow. Terminal close
+codes, the substrate's `TERMINAL_CLOSE_CODES`: `4403`, `4404`, `4410` — do not
+retry with the same credential. `4401` is NOT terminal: the token expired or is
+missing, so refresh it and reconnect (transparent in cookie mode). Everything
+else is a normal reconnect.
+
+Membership is re-checked on the socket, not only at the door: every write frame
+(`send`, `edit`, `delete`, `read`, `delivered`, `activity`) asks it again
+uncached, and the substrate re-asks every `AUTHORIZE_CACHE_S` seconds even on a
+socket that only listens. Removing a participant row by any path (leave, admin,
+merge, erasure) also revokes the open subscription at once.
 
 #### client → server
 

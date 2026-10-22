@@ -477,9 +477,7 @@ def post_message(
     _refuse_if_blocked(conversation, sender)
     client_msg_id = (client_msg_id or "").strip()[:64]
     if client_msg_id:
-        existing = Message.objects.filter(
-            conversation_id=conversation.pk, client_msg_id=client_msg_id
-        ).first()
+        existing = _idempotent_twin(conversation, sender, kind, client_msg_id)
         if existing is not None:
             return existing
     attachments = prepare_attachments(attachments)
@@ -496,13 +494,29 @@ def post_message(
             if client_msg_id:
                 # The collision may be the idempotency constraint rather than
                 # the seq one — a concurrent retry of the same send.
-                twin = Message.objects.filter(
-                    conversation_id=conversation.pk, client_msg_id=client_msg_id
-                ).first()
+                twin = _idempotent_twin(conversation, sender, kind, client_msg_id)
                 if twin is not None:
                     return twin
             continue
     raise last_err  # pragma: no cover - exhausted retries
+
+
+def _idempotent_twin(conversation, sender, kind, client_msg_id):
+    """The message an earlier send with this key produced, or None.
+
+    Scoped exactly as the unique constraints are: per (conversation, sender)
+    for authored messages, per conversation for system lines. Matching on the
+    conversation alone returned another participant's message as the result
+    of this one's send.
+    """
+    rows = Message.objects.filter(
+        conversation_id=conversation.pk, client_msg_id=client_msg_id
+    )
+    if kind == MessageKind.SYSTEM:
+        return rows.filter(kind=MessageKind.SYSTEM).first()
+    if sender is None:
+        return None
+    return rows.exclude(kind=MessageKind.SYSTEM).filter(sender_id=sender.pk).first()
 
 
 def post_system_message(

@@ -92,6 +92,53 @@ ERROR_SEND_REFUSED = "send_refused"
 ERROR_UNAVAILABLE = "unavailable"
 
 
+# ── frame field validation ──────────────────────────────────────────────
+
+
+class BadField(ValueError):
+    """A write frame's field has the wrong type or shape.
+
+    Raised before any service is called and answered as an ``error`` frame
+    with ``bad_envelope``: a malformed field used to escape ``receive_json``
+    as AttributeError/TypeError/ValidationError and kill the socket without
+    telling the client why.
+    """
+
+
+def _text(payload: dict, key: str) -> str:
+    value = payload.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise BadField(f"'{key}' must be a string")
+    return value.strip()
+
+
+def _uuid(payload: dict, key: str, *, required: bool):
+    import uuid
+
+    value = payload.get(key)
+    if value in (None, ""):
+        if required:
+            raise BadField(f"'{key}' is required")
+        return None
+    if not isinstance(value, str):
+        raise BadField(f"'{key}' must be a UUID string")
+    try:
+        return uuid.UUID(value)
+    except ValueError as exc:
+        raise BadField(f"'{key}' must be a UUID string") from exc
+
+
+def _attachment_list(payload: dict) -> list:
+    value = payload.get("attachments")
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise BadField("'attachments' must be a list")
+    return value
+
+
 # ── sync helpers (each runs in a thread) ────────────────────────────────
 
 
@@ -153,8 +200,9 @@ def _do_send(conversation_id, user_id, payload: dict) -> dict | None:
     from .conf import chat_settings
     from .models import Message, MessageKind
 
-    body = (payload.get("body") or "").strip()
-    attachments = payload.get("attachments") or []
+    body = _text(payload, "body")
+    attachments = _attachment_list(payload)
+    reply_to_id = _uuid(payload, "reply_to", required=False)
     if not body and not attachments:
         return {"code": ERROR_EMPTY, "message": "message needs a body or an attachment"}
     if attachments and not chat_settings.ATTACHMENTS:
@@ -170,7 +218,6 @@ def _do_send(conversation_id, user_id, payload: dict) -> dict | None:
         return {"code": ERROR_NOT_FOUND, "message": "conversation not found"}
 
     reply_to = None
-    reply_to_id = payload.get("reply_to")
     if reply_to_id:
         reply_to = Message.objects.filter(
             pk=reply_to_id, conversation_id=conversation_id
@@ -209,13 +256,14 @@ def _do_edit(conversation_id, user_id, payload: dict) -> dict | None:
     from .conf import chat_settings
     from .models import Message
 
-    body = (payload.get("body") or "").strip()
+    body = _text(payload, "body")
+    message_id = _uuid(payload, "message_id", required=True)
     if not body:
         return {"code": ERROR_EMPTY, "message": "an edited message needs a body"}
     if len(body) > chat_settings.MAX_BODY_LENGTH:
         return {"code": ERROR_TOO_LONG, "message": "message body too long"}
     msg = Message.objects.filter(
-        pk=payload.get("message_id"), conversation_id=conversation_id
+        pk=message_id, conversation_id=conversation_id
     ).first()
     if msg is None:
         return {"code": ERROR_NOT_FOUND, "message": "message not found"}
@@ -236,7 +284,8 @@ def _do_delete(conversation_id, user_id, payload: dict) -> dict | None:
     from .models import Message
 
     msg = Message.objects.filter(
-        pk=payload.get("message_id"), conversation_id=conversation_id
+        pk=_uuid(payload, "message_id", required=True),
+        conversation_id=conversation_id,
     ).first()
     if msg is None:
         return {"code": ERROR_NOT_FOUND, "message": "message not found"}
@@ -401,6 +450,9 @@ class ChatConsumer(PresenceMixin, ResumableStreamConsumer):
     module = "chat"
     scope_type = "conv"
     stream_key_kwarg = "conversation_id"
+    #: Every write re-asks membership uncached: a participant removed by any
+    #: path is refused at the next frame, not at the next reconnect.
+    reauthorize_frames = frozenset({SEND, EDIT, DELETE, READ, DELIVERED, ACTIVITY})
 
     async def get_stream_key(self) -> str:
         kwargs = (self.scope.get("url_route") or {}).get("kwargs") or {}
@@ -452,9 +504,12 @@ class ChatConsumer(PresenceMixin, ResumableStreamConsumer):
         return handlers
 
     async def _run(self, func, frame):
-        err = await database_sync_to_async(func)(
-            self.conversation_id, self._user_id(), frame.payload
-        )
+        try:
+            err = await database_sync_to_async(func)(
+                self.conversation_id, self._user_id(), frame.payload
+            )
+        except BadField as exc:
+            err = {"code": wire.ERROR_BAD_ENVELOPE, "message": str(exc)}
         if err:
             await self._error(err["code"], err["message"])
 

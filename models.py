@@ -419,12 +419,22 @@ class Message(models.Model):
             models.UniqueConstraint(
                 fields=["conversation", "seq"], name="chat_message_uniq_seq"
             ),
-            # Idempotent send. Partial so the blank default (system lines, a
-            # client that sends none) never collides.
+            # Idempotent send, per SENDER: a client-chosen key ("tmp-1", a
+            # counter) is only unique within one author's sends, so a
+            # per-conversation key let one participant's retry swallow another
+            # participant's message. Partial so the blank default never
+            # collides. A sender detached by erasure is NULL, and NULLs never
+            # collide, so erasure cannot trip it.
+            models.UniqueConstraint(
+                fields=["conversation", "sender", "client_msg_id"],
+                condition=~models.Q(client_msg_id="") & ~models.Q(kind="system"),
+                name="chat_message_uniq_sender_client_id",
+            ),
+            # System lines have no sender; their key is per conversation.
             models.UniqueConstraint(
                 fields=["conversation", "client_msg_id"],
-                condition=~models.Q(client_msg_id=""),
-                name="chat_message_uniq_client_id",
+                condition=~models.Q(client_msg_id="") & models.Q(kind="system"),
+                name="chat_message_uniq_system_client_id",
             ),
         ]
         indexes = [
