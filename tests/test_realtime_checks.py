@@ -51,14 +51,17 @@ class TestTheHarnessIsClean:
 
 
 class TestSubstrateAndTransport:
-    def test_missing_substrate_app_is_an_error(self):
-        installed = [
-            app
-            for app in __import__("django.conf", fromlist=["settings"]).settings.INSTALLED_APPS
-            if app != "stapel_realtime"
-        ]
-        with override_settings(INSTALLED_APPS=installed):
-            assert _ids(check_realtime_substrate(None)) == ["stapel_chat.E010"]
+    def test_missing_substrate_app_is_an_error(self, monkeypatch):
+        # Asked of the app registry directly: re-populating INSTALLED_APPS
+        # re-runs every installed app's ready(), and not every sibling's
+        # ready() may run twice in one process.
+        from django.apps import apps
+
+        real = apps.is_installed
+        monkeypatch.setattr(
+            apps, "is_installed", lambda name: name != "stapel_realtime" and real(name)
+        )
+        assert _ids(check_realtime_substrate(None)) == ["stapel_chat.E010"]
 
     def test_no_channel_layer_is_an_error_not_a_warning(self):
         """A socket with no layer connects, replays once and goes silent while

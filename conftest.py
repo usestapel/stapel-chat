@@ -1,7 +1,11 @@
 def _optional_test_apps() -> tuple:
     from importlib.util import find_spec
 
-    return ("stapel_moderation",) if find_spec("stapel_moderation") else ()
+    # stapel-cdn too, so the attachment seam (tests/test_cdn_seam.py) runs
+    # against the real describe, signer and signed-media route.
+    return tuple(
+        app for app in ("stapel_moderation", "stapel_cdn") if find_spec(app)
+    )
 
 
 def pytest_configure(config):

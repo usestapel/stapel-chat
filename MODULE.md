@@ -1066,6 +1066,13 @@ dependency. 0.5.0 was tagged and never published because that gate did not
 exist: the shared development virtualenv of this fleet has every module
 installed, so it can never be what tells you a dependency is missing.
 
+`stapel-cdn` is installed into the test harness (its app and its routes), so
+`tests/test_cdn_seam.py` sends a voice note uploaded through the CDN's own
+intake and reads it back through chat after a shortened
+`SIGNED_MEDIA_TTL_SECONDS`: the earlier link has expired, a fresh read plays,
+a stranger gets nothing. Against a CDN that still hands out permanent URLs the
+same test asserts the permanent path.
+
 Two rules hold in this suite and are worth reusing:
 
 - **A test that claims to prove interop is never faked**, and it reaches for
