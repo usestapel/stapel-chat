@@ -42,6 +42,17 @@ def pytest_configure(config):
 import pytest  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _fresh_attachment_snapshot_cache():
+    """Describe snapshots are cached across reads; a test starts with none,
+    so one test's fake CDN answer is never another test's cache hit."""
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
 @pytest.fixture
 def api_client():
     from rest_framework.test import APIClient

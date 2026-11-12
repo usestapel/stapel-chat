@@ -107,7 +107,15 @@ class AttachmentResponse:
             is what lets a client tell "still generating" from "this
             deployment has no ffmpeg" and draw the right placeholder.
         variants: Per-tier CDN geometry ``[{tier, branch, url, width,
-            height}]`` for a responsive ``srcset``.
+            height}]`` for a responsive ``srcset``. Resolved for each read and
+            never stored: a private object's URL is a signed link that
+            expires (stapel-cdn ``SIGNED_MEDIA_TTL_SECONDS``).
+        href: This module's stable link to the attachment
+            (``…/messages/<id>/attachments/<index>``). It does not expire:
+            every request re-checks the caller's access and redirects to a
+            freshly resolved URL. For anything kept past a page view — a
+            download link, an e-mail, a push notification. ``null`` for a
+            non-media type or when no CDN metadata is configured.
     """
 
     key: str
@@ -128,6 +136,7 @@ class AttachmentResponse:
     meta_status: str = "missing"
     meta_reason: Optional[str] = None
     variants: List[Dict[str, Any]] = field(default_factory=list)
+    href: Optional[str] = None
 
 
 @dataclass

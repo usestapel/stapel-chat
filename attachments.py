@@ -325,23 +325,8 @@ def describe_attachments(attachments: list[dict]) -> list[dict]:
     if not describable:
         return attachments
 
-    snapshots: dict[str, dict] = {}
-    missing: set[str] = set()
     refs = list(dict.fromkeys(a["key"] for a in describable))
-    try:
-        from stapel_core.comm import call
-
-        for start in range(0, len(refs), DESCRIBE_BATCH_LIMIT):
-            page = refs[start:start + DESCRIBE_BATCH_LIMIT]
-            answer = call("cdn.describe_many", {"refs": page}) or {}
-            snapshots.update(answer.get("items") or {})
-            missing.update(answer.get("missing") or [])
-    except Exception:
-        logger.info(
-            "chat: cdn.describe_many unavailable for %d ref(s); "
-            "keeping client metadata", len(refs), exc_info=True,
-        )
-        return attachments
+    snapshots, missing, _unanswered = _fetch_snapshots(refs)
 
     out = []
     for attachment in attachments:
@@ -361,7 +346,13 @@ def describe_attachment(attachment: dict) -> dict:
 
 
 def prepare_attachments(raws) -> list[dict]:
-    """Normalize, then enrich, a whole inbound attachment list."""
+    """Normalize, then enrich, a whole inbound attachment list.
+
+    What comes back is the STORED form: with CDN metadata on, every media
+    attachment is reduced to :func:`reference_form` — the ref and the facts
+    that do not expire. The URLs in the snapshot are not kept (see
+    :func:`resolve_messages`).
+    """
     from .conf import chat_settings
 
     items = list(raws or [])
@@ -370,9 +361,264 @@ def prepare_attachments(raws) -> list[dict]:
             f"at most {chat_settings.MAX_ATTACHMENTS} attachments per message"
         )
     normalized = [normalize_attachment(item) for item in items]
-    if str(chat_settings.ATTACHMENT_METADATA) != "cdn":
+    if not _cdn_metadata():
         return normalized
-    return describe_attachments(normalized)
+    return [reference_form(a) for a in describe_attachments(normalized)]
+
+
+# ── references at rest, URLs at read ─────────────────────────────────────
+#
+# A CDN URL is not a fact about an attachment; it is a short-lived grant. A
+# private object (a voice note, a document) is served by a signed link that
+# expires after the CDN's SIGNED_MEDIA_TTL_SECONDS, so a URL written into a
+# message row is dead minutes after the send. The row therefore keeps the ref
+# and the non-expiring metadata, and every read resolves URLs afresh, after
+# the reader's access to the message has been decided by the caller. The CDN
+# signs for whoever asks it with a ref: which reader may see an attachment is
+# this module's decision, and every caller of resolve_messages makes it first.
+
+#: Fields that hold a URL, or a structure of them, on a media attachment.
+#: ``variants`` entries carry one ``url`` each; ``href`` is this module's own
+#: stable link, derived per read and never stored.
+URL_FIELDS = frozenset({"url", "poster_url", "clean_url", "variants", "href"})
+
+#: ``meta_reason`` of a media attachment whose ref the CDN did not answer
+#: about on this read (unreachable, timed out, not installed). The stored
+#: metadata still renders; only the URLs are absent.
+REASON_CDN_UNAVAILABLE = "cdn_unavailable"
+
+_CACHE_PREFIX = "stapel_chat:attachment-snapshot:"
+
+
+def _cdn_metadata() -> bool:
+    from .conf import chat_settings
+
+    return str(chat_settings.ATTACHMENT_METADATA) == "cdn"
+
+
+def _is_media(attachment: dict) -> bool:
+    return bool(
+        (get_attachment_types().get(attachment.get("type")) or {}).get("media")
+    )
+
+
+def _is_url_field(name: str) -> bool:
+    return name in URL_FIELDS or name.endswith("_url")
+
+
+def reference_form(attachment) -> dict:
+    """The stored shape of one attachment: everything but its URLs.
+
+    A media attachment loses every URL-bearing field; a host-registered
+    non-media type (``media: False``) is not a CDN object and is kept as it
+    came. The pre-0.3 bare-string form is read as a ``file`` ref.
+    """
+    if isinstance(attachment, str):
+        attachment = {"key": attachment, "type": "file"}
+    if not isinstance(attachment, dict):
+        return {}
+    if not _is_media(attachment):
+        return dict(attachment)
+    return {k: v for k, v in attachment.items() if not _is_url_field(k)}
+
+
+def _cache_seconds() -> int:
+    from .conf import chat_settings
+
+    try:
+        return max(0, int(chat_settings.ATTACHMENT_URL_CACHE_S or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _fetch_snapshots(refs: list[str]) -> tuple[dict, set, set]:
+    """``(snapshots, missing, unanswered)`` for ``refs``.
+
+    Cached snapshots are served first; the rest go to ``cdn.describe_many`` in
+    pages of :data:`DESCRIBE_BATCH_LIMIT`. A page whose call fails leaves its
+    refs in ``unanswered`` and does not stop the other pages.
+    """
+    from django.core.cache import cache
+
+    snapshots: dict[str, dict] = {}
+    missing: set[str] = set()
+    unanswered: set[str] = set()
+    ttl = _cache_seconds()
+    pending = list(refs)
+    if ttl and pending:
+        try:
+            hits = cache.get_many([_CACHE_PREFIX + r for r in pending])
+        except Exception:
+            hits = {}
+        for ref in pending:
+            snapshot = hits.get(_CACHE_PREFIX + ref)
+            if isinstance(snapshot, dict):
+                snapshots[ref] = snapshot
+        pending = [r for r in pending if r not in snapshots]
+    if not pending:
+        return snapshots, missing, unanswered
+
+    try:
+        from stapel_core.comm import call
+    except Exception:  # pragma: no cover - stapel-core is a hard dependency
+        return snapshots, missing, set(pending)
+
+    fresh: dict[str, dict] = {}
+    for start in range(0, len(pending), DESCRIBE_BATCH_LIMIT):
+        page = pending[start:start + DESCRIBE_BATCH_LIMIT]
+        try:
+            answer = call("cdn.describe_many", {"refs": page}) or {}
+        except Exception:
+            logger.info(
+                "chat: cdn.describe_many unavailable for %d ref(s); "
+                "attachments render without URLs", len(page), exc_info=True,
+            )
+            unanswered.update(page)
+            continue
+        items = answer.get("items") or {}
+        page_missing = set(answer.get("missing") or [])
+        for ref in page:
+            if isinstance(items.get(ref), dict):
+                fresh[ref] = items[ref]
+            elif ref in page_missing:
+                missing.add(ref)
+            else:
+                unanswered.add(ref)
+    snapshots.update(fresh)
+    if ttl and fresh:
+        try:
+            cache.set_many({_CACHE_PREFIX + r: s for r, s in fresh.items()}, ttl)
+        except Exception:
+            logger.debug("chat: attachment snapshot cache unavailable", exc_info=True)
+    return snapshots, missing, unanswered
+
+
+def _unavailable(attachment: dict) -> dict:
+    out = dict(attachment)
+    out["meta_status"] = "partial" if out.get("meta_status") == "ok" else (
+        out.get("meta_status") or "missing"
+    )
+    out["meta_reason"] = REASON_CDN_UNAVAILABLE
+    return out
+
+
+def _with_url_defaults(attachment: dict) -> dict:
+    out = dict(attachment)
+    out.setdefault("poster_url", None)
+    out.setdefault("variants", [])
+    return out
+
+
+def attachment_href(conversation_id, message_id, index: int):
+    """This module's stable link to one attachment, or ``None`` unmounted.
+
+    It does not expire: each request checks the caller's access to the
+    message and redirects to a URL resolved at that moment
+    (:class:`~stapel_chat.views.MessageAttachmentView`).
+    """
+    from django.urls import NoReverseMatch, reverse
+
+    try:
+        return reverse(
+            "chat-message-attachment",
+            args=[str(conversation_id), str(message_id), int(index)],
+        )
+    except NoReverseMatch:
+        return None
+
+
+def stored_attachments(message) -> list[dict]:
+    """A message's attachments in reference form, each with its ``href``.
+
+    For readers that keep what they are given past a signed link's lifetime
+    (the ``chat.message`` Action on the bus). No CDN call is made.
+    """
+    if getattr(message, "deleted_at", None) is not None:
+        return []
+    out = []
+    for index, raw in enumerate(message.attachments or []):
+        item = reference_form(raw)
+        if not item:
+            continue
+        if _is_media(item) and _cdn_metadata():
+            item["href"] = attachment_href(message.conversation_id, message.pk, index)
+        out.append(item)
+    return out
+
+
+def resolve_messages(messages) -> dict[str, list[dict]]:
+    """Fresh attachments for a page of messages: ``{str(message.pk): [...]}``.
+
+    The caller has already decided that the reader may see every message
+    passed in; this function grants URLs to exactly those. Every media ref on
+    the page is resolved in one batched describe (paged at the CDN's ceiling,
+    so a page costs ``ceil(refs / 50)`` calls, never one per attachment) and
+    merged over the stored reference form, so a row written before URLs
+    stopped being stored — one that still carries a snapshot's URLs — is read
+    exactly like a new one: its stored URLs are dropped, not served.
+
+    A ref the CDN reports missing is ``meta_status: "missing"`` /
+    ``unknown_ref``; one it did not answer about is
+    ``meta_reason: "cdn_unavailable"`` with no URLs. Neither fails the read.
+    A tombstone has no attachments.
+    """
+    messages = list(messages)
+    stored: dict[str, list[dict]] = {}
+    for message in messages:
+        if getattr(message, "deleted_at", None) is not None:
+            stored[str(message.pk)] = []
+            continue
+        items = []
+        for index, raw in enumerate(message.attachments or []):
+            if not isinstance(raw, (dict, str)):
+                continue
+            item = normalize_stored(raw)
+            if _is_media(item) and _cdn_metadata():
+                item = reference_form(item)
+                item["href"] = attachment_href(
+                    message.conversation_id, message.pk, index
+                )
+            items.append(item)
+        stored[str(message.pk)] = items
+
+    if not _cdn_metadata():
+        return stored
+
+    refs = list(dict.fromkeys(
+        a["key"] for items in stored.values() for a in items
+        if _is_media(a) and a.get("key")
+    ))
+    if not refs:
+        return stored
+    snapshots, missing, unanswered = _fetch_snapshots(refs)
+
+    resolved: dict[str, list[dict]] = {}
+    for message_id, items in stored.items():
+        out = []
+        for item in items:
+            key = item.get("key")
+            if not _is_media(item):
+                out.append(item)
+            elif key in snapshots:
+                out.append(_with_url_defaults(_apply_snapshot(item, snapshots[key])))
+            elif key in missing:
+                out.append(_with_url_defaults(_unresolved(item)))
+            else:
+                out.append(_with_url_defaults(_unavailable(item)))
+        resolved[message_id] = out
+    return resolved
+
+
+def resolve_message(message) -> list[dict]:
+    """:func:`resolve_messages` for one message."""
+    return resolve_messages([message])[str(message.pk)]
+
+
+def normalize_stored(raw) -> dict:
+    """A stored attachment as a dict, tolerating the pre-0.3 bare string."""
+    if isinstance(raw, str):
+        return {"key": raw, "type": "file"}
+    return dict(raw)
 
 
 __all__ = [
@@ -381,12 +627,20 @@ __all__ = [
     "InvalidAttachment",
     "UnknownAttachmentType",
     "DESCRIBE_BATCH_LIMIT",
+    "REASON_CDN_UNAVAILABLE",
+    "URL_FIELDS",
+    "attachment_href",
     "attachment_type_names",
     "describe_attachment",
     "describe_attachments",
     "get_attachment_types",
     "normalize_attachment",
+    "normalize_stored",
     "prepare_attachments",
+    "reference_form",
     "register_attachment_type",
     "reset_attachment_types",
+    "resolve_message",
+    "resolve_messages",
+    "stored_attachments",
 ]

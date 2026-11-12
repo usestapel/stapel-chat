@@ -4,6 +4,24 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — proposed 0.12.0
+
+### Changed — attachment URLs are resolved per read, never stored (behaviour change)
+
+stapel-cdn signs every URL of a private object (voice notes, documents) with
+an expiring link, so a URL written into a message row stops working minutes
+after the send. A message attachment now stores its CDN `key` and the
+non-expiring metadata only — no `variants`, `poster_url` or other URL field,
+whatever the sender claimed — and every read resolves fresh URLs in one
+batched `cdn.describe_many` per response: the history page, the send and
+edit responses, the live socket frame and the socket replay. Rows written
+earlier are read the same way (their stored URLs are dropped, not served).
+A ref the CDN does not answer about degrades that attachment
+(`meta_reason: "cdn_unavailable"`, empty `variants`), never the thread.
+New tuning setting `ATTACHMENT_URL_CACHE_S` (60): how long a snapshot is
+reused across reads. The `chat.message` / `chat.message.edited` Actions and
+any payload built without a read carry the stored reference form.
+
 ## [0.11.0] — 2026-10-22
 
 ### Fixed — a removed participant's socket stops writing and listening

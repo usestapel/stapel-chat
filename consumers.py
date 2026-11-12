@@ -170,14 +170,27 @@ def _replay(conversation_id, after_seq: int, limit: int, user_id=None) -> list:
         if user_id is not None
         else None
     )
-    return [
-        JournalRow(seq=m.rev_seq, payload=message_payload(m, m.conversation))
-        for m in services.journal_rows(
+    from .attachments import resolve_messages
+
+    rows = list(
+        services.journal_rows(
             conversation_id=conversation_id,
             after_seq=after_seq,
             limit=limit,
             cleared_at=cleared_at,
         )
+    )
+    # A replay can reach back past any signed link's lifetime, so its URLs
+    # are resolved now, for the whole batch at once.
+    resolved = resolve_messages(rows)
+    return [
+        JournalRow(
+            seq=m.rev_seq,
+            payload=message_payload(
+                m, m.conversation, attachments=resolved[str(m.pk)]
+            ),
+        )
+        for m in rows
     ]
 
 

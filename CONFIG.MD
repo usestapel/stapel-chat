@@ -27,6 +27,7 @@ deployment that shipped "updates every few seconds" never chose it either.
 | ACTIVITY_STATES | env | OPEN registry, merged over the builtins {idle, typing, recording_audio, sending_video, uploading_file}; `None` removes one. | no | {} |
 | ATTACHMENT_METADATA | env | axis: `cdn` asks `cdn.describe_many` by comm (one call per message, paged at 50 refs) and merges its answer over the client's; `client` trusts the sender and makes no call. | no | cdn |
 | MAX_ATTACHMENTS | env | axis: attachments per message. | no | 10 |
+| ATTACHMENT_URL_CACHE_S | env | tuning: seconds a CDN describe snapshot (and its URLs) is reused across reads. Attachments are stored as refs and every read resolves fresh URLs; keep this well under stapel-cdn's `SIGNED_MEDIA_TTL_SECONDS`. 0 disables the cache. | no | 60 |
 | MAX_PREVIEW_B64_BYTES | env | axis: ceiling on an inline `data:` preview (micro-thumbnail / poster / waveform) — untrusted bytes rendered on other people's screens. Matches stapel-cdn's MICRO_PREVIEW_MAX_BYTES and is measured the same way. | no | 4096 |
 | EDIT_WINDOW_S | env | axis: seconds an author may still edit their own message; 0 = no deadline. | no | 0 |
 | SCOPE_PROVIDER | env | dotted path to a ScopeProvider (resolve/filter the opaque scope_key). | no | stapel_chat.scope.DefaultScopeProvider |

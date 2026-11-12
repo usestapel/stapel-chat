@@ -221,7 +221,7 @@ class TestCdnContract:
         assert out["preview_b64"].startswith("data:image/webp;base64,")
         assert out["preview_kind"] == "blur"
         assert out["meta_status"] == "ok"
-        assert out["variants"], "srcset geometry for a responsive img"
+        assert "variants" not in out, "URLs are resolved per read, never stored"
 
     def test_a_voice_message_gets_duration_and_a_waveform_preview(self):
         self._register({
@@ -246,7 +246,7 @@ class TestCdnContract:
         [out] = prepare_attachments([{"key": "video/abc", "type": "video"}])
         assert out["duration_ms"] == 30_000
         assert out["preview_kind"] == "poster"
-        assert out["poster_url"] == "/m/poster.webp"
+        assert "poster_url" not in out, "URLs are resolved per read, never stored"
         assert out["aspect"] == pytest.approx(1.7778, rel=1e-3)
 
     def test_the_whole_message_costs_ONE_call(self):

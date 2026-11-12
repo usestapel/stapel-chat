@@ -24,7 +24,7 @@ from stapel_core.django.api.views import SerializerSeamMixin
 
 from . import services, subjects
 from .activity import UnknownActivityState
-from .attachments import InvalidAttachment, UnknownAttachmentType
+from .attachments import InvalidAttachment, UnknownAttachmentType, resolve_messages
 from .conf import chat_settings
 from .dto import (
     AttachmentResponse,
@@ -171,10 +171,11 @@ def attachment_to_dto(raw: dict) -> AttachmentResponse:
         meta_status=raw.get("meta_status") or "missing",
         meta_reason=raw.get("meta_reason"),
         variants=list(raw.get("variants") or []),
+        href=raw.get("href"),
     )
 
 
-def message_to_dto(msg: Message) -> MessageResponse:
+def message_to_dto(msg: Message, attachments=None) -> MessageResponse:
     """A message, or its tombstone — the deleted row is returned, not hidden.
 
     Filtering tombstones out of history would defeat their only purpose: a
@@ -182,6 +183,9 @@ def message_to_dto(msg: Message) -> MessageResponse:
     stripped, and an id that stops arriving is an id nobody can purge.
     """
     deleted = msg.deleted_at is not None
+    if attachments is None and not deleted:
+        # URLs are never read from the row: they are resolved for this read.
+        attachments = resolve_messages([msg])[str(msg.pk)]
     return MessageResponse(
         id=str(msg.id),
         conversation_id=str(msg.conversation_id),
@@ -193,7 +197,7 @@ def message_to_dto(msg: Message) -> MessageResponse:
         sender_id=str(msg.sender_id) if msg.sender_id else None,
         reply_to=str(msg.reply_to_id) if msg.reply_to_id else None,
         attachments=(
-            [] if deleted else [attachment_to_dto(a) for a in (msg.attachments or [])]
+            [] if deleted else [attachment_to_dto(a) for a in (attachments or [])]
         ),
         client_msg_id=msg.client_msg_id or None,
         edited=msg.edited_at is not None,
@@ -822,7 +826,12 @@ class MessageListCreateView(SerializerSeamMixin, APIView):
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request)
         response_cls = self.get_response_serializer_class()
-        items = [response_cls(message_to_dto(m)).data for m in page]
+        # Every attachment URL on the page in one batched describe, granted
+        # only after the participant check above.
+        resolved = resolve_messages(page)
+        items = [
+            response_cls(message_to_dto(m, resolved[str(m.pk)])).data for m in page
+        ]
         return paginator.get_paginated_response(items)
 
     @extend_schema(

@@ -873,6 +873,11 @@
               "additionalProperties": {}
             },
             "description": "Per-tier CDN geometry ``[{tier, branch, url, width,"
+          },
+          "href": {
+            "type": "string",
+            "nullable": true,
+            "description": "This module's stable link to the attachment"
           }
         },
         "required": [

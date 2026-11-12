@@ -183,6 +183,7 @@ environment variable -> default. Read lazily at call time.
 | `ACTIVITY_STATES` | `{}` | The activity-state registry | **merge over builtins** (`None` removes) |
 | `ATTACHMENT_METADATA` | `"cdn"` | `cdn` asks `cdn.describe`; `client` trusts the sender | **axis** (enum) |
 | `MAX_ATTACHMENTS` | `10` | Attachments per message | **axis** (int) |
+| `ATTACHMENT_URL_CACHE_S` | `60` | Seconds a describe snapshot (and its URLs) is reused across reads; keep under the CDN's `SIGNED_MEDIA_TTL_SECONDS`; 0 = off | tuning (int) |
 | `MAX_PREVIEW_B64_BYTES` | `8192` | Ceiling on an inline `data:` preview | **axis** (int) |
 | `EDIT_WINDOW_S` | `0` | Seconds an author may still edit (0 = forever) | **axis** (int) |
 | `MODERATION_TARGET_TYPE` | `"chat_message"` | The stapel-moderation target registered for messages (`""` = none) | **axis** (enum) |
@@ -283,6 +284,27 @@ CDN (downgrade-then-refuse, never truncation — a truncated base64 string is a
 broken image in every consumer) and again here by `MAX_PREVIEW_B64_BYTES`,
 which matches it deliberately. `MAX_ATTACHMENTS` × that is the per-message
 preview weight a client pays for.
+
+**References at rest, URLs at read (0.12.0).** A CDN URL is a short-lived
+grant, not a fact: from the stapel-cdn release after 0.30.0 every `File`/`Audio` original (voice
+notes, documents) is served by a signed link that expires after
+`SIGNED_MEDIA_TTL_SECONDS` (900 s by default). So a message row stores the
+`key` and the facts that do not expire (`type`, `mime`, `bytes`, `name`,
+`ext`, dimensions, `duration_ms`, `preview_b64`, `meta_*`) and **no URL**
+(`attachments.URL_FIELDS`: `variants`, `poster_url`, `url`, `clean_url`,
+`*_url`, `href`) — including any URL the sender claimed. Every read resolves
+fresh URLs (`attachments.resolve_messages`): the history page, the send and
+edit responses, the live socket frame and the socket replay — one batched
+`cdn.describe_many` per response (paged at 50 refs), after the caller has
+decided the reader may see those messages. A row written before 0.12.0 still
+carries a snapshot's URLs; the read drops them and resolves like any other, so
+it needs no migration to work (`chat_strip_attachment_urls` removes them at
+rest, see below). Snapshots are cached `ATTACHMENT_URL_CACHE_S` (60 s) per
+ref; keep it well under the CDN's TTL. A ref the CDN did not answer about on
+this read is `meta_reason: "cdn_unavailable"` with empty `variants` and its
+stored facts intact — that item degrades, the thread does not. Works the same
+against a CDN that still hands out permanent URLs: nothing is detected, every
+read resolves.
 
 **Claiming, and why it is not optional (0.9.2).** The CDN is a reference
 counter with a collector attached: an upload is stamped `unreferenced_since`
@@ -588,7 +610,10 @@ an `error` frame.
 ```
 
 Every attachment key is always present, `null` where unknown — a client never
-has to test for a field's existence.
+has to test for a field's existence. `variants` and `poster_url` are resolved
+for this delivery (a live frame at push time, a replay at replay time) and a
+private object's URL expires; a client that keeps a payload past that refetches
+the message rather than replaying its URL.
 
 #### `error` codes on this socket
 

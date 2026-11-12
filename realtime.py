@@ -39,6 +39,8 @@ from __future__ import annotations
 
 import logging
 
+from .attachments import resolve_message, stored_attachments
+
 logger = logging.getLogger(__name__)
 
 #: Canonical stream-key module segment.
@@ -84,9 +86,14 @@ def user_stream(user_id) -> str:
 # ── payloads ─────────────────────────────────────────────────────────────
 
 
-def message_payload(msg, conv=None) -> dict:
+def message_payload(msg, conv=None, attachments=None) -> dict:
     """The one message shape, used by the journal frame, the ``chat.message``
     Action and the REST serializer alike.
+
+    ``attachments`` is the list this reader gets: the frame and the replay
+    pass the URLs resolved for this delivery
+    (:func:`stapel_chat.attachments.resolve_messages`). Without it the
+    payload carries the stored reference form, which holds no URL.
 
     A deleted message keeps its ``id``, ``seq``, ``sender_id`` and
     ``created_at`` and loses everything else: ``body`` is empty,
@@ -104,7 +111,10 @@ def message_payload(msg, conv=None) -> dict:
         "kind": msg.kind,
         "body": "" if deleted else msg.body,
         "reply_to": str(msg.reply_to_id) if msg.reply_to_id else None,
-        "attachments": [] if deleted else list(msg.attachments or []),
+        "attachments": [] if deleted else (
+            list(attachments) if attachments is not None
+            else stored_attachments(msg)
+        ),
         "client_msg_id": msg.client_msg_id or None,
         "edited": msg.edited_at is not None,
         "edited_at": msg.edited_at.isoformat() if msg.edited_at else None,
@@ -142,7 +152,7 @@ def broadcast_message(msg, conv, participant_ids=()) -> None:
     Called from ``transaction.on_commit`` — the row that owns ``rev_seq`` is
     already durable, so a subscriber that misses this replays it.
     """
-    payload = message_payload(msg, conv)
+    payload = message_payload(msg, conv, attachments=resolve_message(msg))
     _deliver_frame(conversation_stream(conv.id), payload, seq=msg.rev_seq)
     for user_id in participant_ids:
         _signal(

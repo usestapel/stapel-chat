@@ -102,6 +102,13 @@ DEFAULTS = {
     "ATTACHMENT_METADATA": "cdn",
     # Most attachments one message may carry.
     "MAX_ATTACHMENTS": 10,
+    # Seconds a CDN describe snapshot (and the URLs in it) is reused across
+    # reads (a "tuning" int). Attachments are stored as refs and every read
+    # resolves their URLs; this bounds how often the same ref is described.
+    # Keep it well under stapel-cdn's SIGNED_MEDIA_TTL_SECONDS (900 by
+    # default): a URL served from the cache lives for that TTL minus its age
+    # here. 0 disables the cache.
+    "ATTACHMENT_URL_CACHE_S": 60,
     # Ceiling on an inline base64 preview in bytes. Matches stapel-cdn's own
     # MICRO_PREVIEW_MAX_BYTES default, measured the same way (on the finished
     # data: URI, base64 expansion included) — a second, larger number here
