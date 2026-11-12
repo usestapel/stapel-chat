@@ -330,10 +330,35 @@ live frame goes to subscribers the socket authorized as participants, and a
 replay runs after that check; `chat.moderation_content` returns refs, never
 URLs, and leaves who may look to moderation's policy. The Actions carry no
 signed URL. `tests/test_attachment_authorization.py` walks every mounted route
-with every method as a stranger and asserts no describe is reached. Not
-closed here: a sender may attach a ref they did not upload, and stapel-cdn's
-own `POST /describe/` signs for any signed-in caller holding a ref — both need
-an ownership answer from stapel-cdn.
+with every method as a stranger and asserts no describe is reached.
+stapel-cdn's own `POST /describe/` hands a private object's URLs only to its
+owner or a service from stapel-cdn 0.31.0 (`PRIVATE_URL_AUDIENCE`), so a
+reader cannot step around this decision by asking the CDN directly; against
+0.30.0 it still signs for any signed-in caller holding a ref.
+
+**Who may attach what — the write side (stapel-cdn ≥ 0.31.0).** Attaching a
+ref shares its bytes with every reader, so a send asks **`cdn.ownership`**
+once for all of its media refs (`attachments.verify_ownership`, before the
+describe and before anything is stored):
+
+| The ref is | The send |
+|---|---|
+| `public` (images, video — on the public media route anyway) | allowed |
+| `private` / `protected`, and the sender holds a row for it | allowed |
+| `private` / `protected`, not the sender's, but already on a live (not deleted) message of **this** thread | allowed — a quote; how a support operator forwards the customer's file within the thread (operators are participants only once assigned, which the send already requires) |
+| `private` / `protected`, not the sender's and not in this thread | refused: `403 error.403.chat_attachment_not_owned`, `params: {"index": n}`; socket `attachment_not_owned` |
+| unknown to the CDN | refused the same way — the answer never says whether somebody else's object exists |
+
+System lines (`sender=None`) are not checked; edits cannot change
+attachments; `ATTACHMENT_METADATA = "client"` asks nothing (that mode trusts
+the sender by definition). **Against a CDN without `cdn.ownership`** (0.30.0),
+or one that fails or skips a ref, the send proceeds exactly as before, logs a
+WARNING (`attachment ownership NOT verified`) and is counted
+(`attachments.ownership_unverified_total()`); `stapel_chat.W006` (security)
+says at boot that the check is inactive wherever the transport can prove the
+Function unreachable (`inprocess`, `http` — over a bus only the runtime
+WARNING can tell). The gap closes when the deployment runs stapel-cdn ≥ 0.31.0
+and, over http, routes `cdn.ownership` like `cdn.describe_many`.
 
 Rows written before 0.12.0 still hold the snapshot's URLs at rest. They read
 correctly without any migration (the read drops them); to leave no expired or
@@ -661,7 +686,7 @@ the message rather than replaying its URL.
 
 Substrate: `bad_envelope`, `bad_type`, `unauthorized`. Chat: `empty`,
 `too_long`, `attachments_disabled`, `invalid_attachment`,
-`unknown_attachment_type`, `invalid_reply`, `not_found`, `not_author`,
+`attachment_not_owned` (the message names the index), `unknown_attachment_type`, `invalid_reply`, `not_found`, `not_author`,
 `not_editable`, `deleted`, `unknown_activity`.
 
 #### the client loop, in full

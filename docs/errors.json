@@ -314,6 +314,16 @@
     "owner": "stapel_core"
   },
   {
+    "code": "error.403.chat_attachment_not_owned",
+    "status": 403,
+    "params": [
+      "index"
+    ],
+    "remediation": "fix_input",
+    "en": "Attachment {index} of this message is not yours to share",
+    "owner": "stapel_chat"
+  },
+  {
     "code": "error.403.chat_not_author",
     "status": 403,
     "params": [],

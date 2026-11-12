@@ -57,6 +57,22 @@ def _fresh_attachment_snapshot_cache():
     cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_ownership_provider():
+    """Every test starts on the behaviour of a CDN without ``cdn.ownership``
+    (stapel-cdn up to 0.30.0), whichever stapel-cdn is installed, so the suite
+    means the same thing against both. Tests of the check install their own
+    provider (``tests/test_attachment_ownership.py``) or the real one
+    (``tests/test_cdn_seam.py``)."""
+    from stapel_core.comm import function_registry
+
+    saved = function_registry._providers.pop("cdn.ownership", None)
+    yield
+    function_registry._providers.pop("cdn.ownership", None)
+    if saved is not None:
+        function_registry._providers["cdn.ownership"] = saved
+
+
 @pytest.fixture
 def cdn(settings):
     """A fake ``cdn.describe_many`` that signs a fresh link per call, with the

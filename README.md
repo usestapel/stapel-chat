@@ -30,7 +30,7 @@ pip install stapel-chat
 | Config axes | 15 |
 | Usage surface | 39 |
 | Extension points | 9 |
-| Error codes | 67 |
+| Error codes | 68 |
 | Fleet dependencies | [`stapel-auth`](https://github.com/usestapel/stapel-auth) (optional) · [`stapel-cdn`](https://github.com/usestapel/stapel-cdn) (optional) · [`stapel-core`](https://github.com/usestapel/stapel-core) · [`stapel-realtime`](https://github.com/usestapel/stapel-realtime) |
 
 ## Documentation

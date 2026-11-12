@@ -27,6 +27,7 @@ from . import services, subjects
 from .activity import UnknownActivityState
 from .attachments import (
     REASON_CDN_UNAVAILABLE,
+    AttachmentNotOwned,
     InvalidAttachment,
     UnknownAttachmentType,
     attachment_href,
@@ -46,6 +47,7 @@ from .errors import (
     ERR_400_BODY_TOO_LONG,
     ERR_400_EMPTY_MESSAGE,
     ERR_400_INVALID_ATTACHMENT,
+    ERR_403_ATTACHMENT_NOT_OWNED,
     ERR_400_INVALID_DIRECT,
     ERR_400_INCOMPLETE_SUBJECT,
     ERR_400_INVALID_KIND,
@@ -897,6 +899,10 @@ class MessageListCreateView(SerializerSeamMixin, APIView):
             return StapelErrorResponse(400, ERR_400_UNKNOWN_ATTACHMENT_TYPE)
         except InvalidAttachment:
             return StapelErrorResponse(400, ERR_400_INVALID_ATTACHMENT)
+        except AttachmentNotOwned as exc:
+            return StapelErrorResponse(
+                403, ERR_403_ATTACHMENT_NOT_OWNED, {"index": exc.index}
+            )
         response_cls = self.get_response_serializer_class()
         return StapelResponse(
             response_cls(message_to_dto(msg)), status=status.HTTP_201_CREATED

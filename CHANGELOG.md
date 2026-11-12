@@ -40,6 +40,25 @@ operators for support threads, the reader's cleared mark honoured), and a
 containment test walks every mounted route as a stranger and asserts no
 describe is reached.
 
+### Security — a sender may attach only private objects they own
+
+Attaching a ref shares its bytes with every reader of the thread, so a send
+now asks stapel-cdn's `cdn.ownership` (0.31.0+) about every media ref in one
+call, before anything is stored: a private or protected object the sender
+does not hold — or a ref that does not exist — refuses the message with
+`403 error.403.chat_attachment_not_owned` (`params.index` names the
+attachment; the socket answers `attachment_not_owned`). Public objects
+(images, video) are shareable as before, and a ref already on a live message
+of the same thread may be attached again (a quote, or a support operator
+forwarding the customer's file). Edits cannot change attachments, so the send
+is the only write path. With `ATTACHMENT_METADATA = "client"` nothing is asked.
+
+Against a stapel-cdn without the Function (0.30.0) or one that does not
+answer, sends keep working as before; each unverified send logs a WARNING and
+is counted (`attachments.ownership_unverified_total()`), and the new
+`stapel_chat.W006` check says ownership checks are inactive wherever the comm
+transport can prove the Function unreachable at boot.
+
 ### Added — `chat_strip_attachment_urls`
 
 `manage.py chat_strip_attachment_urls [--batch-size N] [--limit N] [--dry-run]`

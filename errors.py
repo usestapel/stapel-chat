@@ -36,6 +36,10 @@ ERR_403_SEND_REFUSED = "error.403.chat_send_refused"
 # tell a sender they are blocked when in fact a service is down.
 ERR_503_BLOCKS_UNAVAILABLE = "error.503.chat_blocks_unavailable"
 ERR_404_ATTACHMENT_NOT_FOUND = "error.404.chat_attachment_not_found"
+# An attached private object is not the sender's to share (or does not exist —
+# the same key, so the answer never says whether somebody else's file does).
+# params: {"index": <position of the attachment in the message as sent>}.
+ERR_403_ATTACHMENT_NOT_OWNED = "error.403.chat_attachment_not_owned"
 ERR_503_ATTACHMENT_UNAVAILABLE = "error.503.chat_attachment_unavailable"
 
 STAPEL_CHAT_ERRORS = {
@@ -63,10 +67,14 @@ STAPEL_CHAT_ERRORS = {
     ERR_403_SEND_REFUSED: "This message could not be sent",
     ERR_503_BLOCKS_UNAVAILABLE: "Messaging is temporarily unavailable, please try again",
     ERR_404_ATTACHMENT_NOT_FOUND: "This attachment does not exist or can no longer be opened",
+    ERR_403_ATTACHMENT_NOT_OWNED: "Attachment {index} of this message is not yours to share",
     ERR_503_ATTACHMENT_UNAVAILABLE: "This attachment is temporarily unavailable, please try again",
 }
 
-register_service_errors(STAPEL_CHAT_ERRORS)
+#: Retrying the same send cannot succeed; removing the attachment can.
+STAPEL_CHAT_REMEDIATION = {ERR_403_ATTACHMENT_NOT_OWNED: "fix_input"}
+
+register_service_errors(STAPEL_CHAT_ERRORS, remediation=STAPEL_CHAT_REMEDIATION)
 
 __all__ = [
     "STAPEL_CHAT_ERRORS",
@@ -94,5 +102,6 @@ __all__ = [
     "ERR_403_SEND_REFUSED",
     "ERR_503_BLOCKS_UNAVAILABLE",
     "ERR_404_ATTACHMENT_NOT_FOUND",
+    "ERR_403_ATTACHMENT_NOT_OWNED",
     "ERR_503_ATTACHMENT_UNAVAILABLE",
 ]

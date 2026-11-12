@@ -480,7 +480,9 @@ def post_message(
         existing = _idempotent_twin(conversation, sender, kind, client_msg_id)
         if existing is not None:
             return existing
-    attachments = prepare_attachments(attachments)
+    attachments = prepare_attachments(
+        attachments, sender=sender, conversation=conversation
+    )
     reply_to_id = reply_to.pk if reply_to is not None else None
     last_err: IntegrityError | None = None
     for _ in range(_MAX_SEQ_RETRIES):

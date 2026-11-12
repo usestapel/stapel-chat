@@ -75,6 +75,7 @@ ERROR_EMPTY = "empty"
 ERROR_TOO_LONG = "too_long"
 ERROR_ATTACHMENTS_DISABLED = "attachments_disabled"
 ERROR_INVALID_ATTACHMENT = "invalid_attachment"
+ERROR_ATTACHMENT_NOT_OWNED = "attachment_not_owned"
 ERROR_UNKNOWN_ATTACHMENT_TYPE = "unknown_attachment_type"
 ERROR_INVALID_REPLY = "invalid_reply"
 ERROR_NOT_FOUND = "not_found"
@@ -209,7 +210,11 @@ def _do_send(conversation_id, user_id, payload: dict) -> dict | None:
     (the on-commit fan-out delivers the frame to every subscriber, sender
     included — there is no separate echo to keep in step)."""
     from . import services
-    from .attachments import InvalidAttachment, UnknownAttachmentType
+    from .attachments import (
+        AttachmentNotOwned,
+        InvalidAttachment,
+        UnknownAttachmentType,
+    )
     from .conf import chat_settings
     from .models import Message, MessageKind
 
@@ -261,6 +266,11 @@ def _do_send(conversation_id, user_id, payload: dict) -> dict | None:
         }
     except InvalidAttachment as exc:
         return {"code": ERROR_INVALID_ATTACHMENT, "message": str(exc)}
+    except AttachmentNotOwned as exc:
+        return {
+            "code": ERROR_ATTACHMENT_NOT_OWNED,
+            "message": f"attachment {exc.index} is not yours to share",
+        }
     return None
 
 

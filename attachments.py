@@ -148,6 +148,19 @@ class InvalidAttachment(Exception):
     """An attachment is malformed (no key, oversized preview, wrong shape)."""
 
 
+class AttachmentNotOwned(Exception):
+    """An attached private object does not belong to the sender.
+
+    ``index`` is the attachment's position in the message as sent. A ref
+    that does not exist is refused the same way, so the answer never tells
+    a sender whether somebody else's object exists.
+    """
+
+    def __init__(self, index: int):
+        self.index = index
+        super().__init__(f"attachment {index} is not the sender's to share")
+
+
 def register_attachment_type(name: str, spec: Optional[dict]) -> None:
     """Register/override an attachment type at runtime.
 
@@ -345,13 +358,16 @@ def describe_attachment(attachment: dict) -> dict:
     return describe_attachments([attachment])[0]
 
 
-def prepare_attachments(raws) -> list[dict]:
+def prepare_attachments(raws, *, sender=None, conversation=None) -> list[dict]:
     """Normalize, then enrich, a whole inbound attachment list.
 
     What comes back is the STORED form: with CDN metadata on, every media
     attachment is reduced to :func:`reference_form` — the ref and the facts
     that do not expire. The URLs in the snapshot are not kept (see
     :func:`resolve_messages`).
+
+    With a ``sender``, every attached private object must be the sender's
+    (:func:`verify_ownership`) before anything is described or stored.
     """
     from .conf import chat_settings
 
@@ -363,7 +379,120 @@ def prepare_attachments(raws) -> list[dict]:
     normalized = [normalize_attachment(item) for item in items]
     if not _cdn_metadata():
         return normalized
+    if sender is not None:
+        verify_ownership(normalized, sender=sender, conversation=conversation)
     return [reference_form(a) for a in describe_attachments(normalized)]
+
+
+# ── who may attach what ──────────────────────────────────────────────────
+#
+# Every read resolves an attachment's URLs for whoever may read the message,
+# so attaching a ref is sharing its bytes with the thread. A private object
+# (a voice note, a document) is the sender's to share only if the sender
+# uploaded it. stapel-cdn answers that with ``cdn.ownership`` (0.31.0+); a
+# CDN without it is a CDN this module cannot ask, and the send then proceeds
+# as before and is counted as unverified rather than refused, so a deployment
+# on an older CDN keeps working (``checks`` W006 says the check is inactive).
+
+#: Visibilities the sender must own. ``public`` objects (images, video) are
+#: served on the public media route to anyone holding the ref, so attaching
+#: one shares nothing that was not already shared.
+OWNED_VISIBILITIES = frozenset({"private", "protected"})
+
+_UNVERIFIED = {"total": 0}
+
+
+def ownership_unverified_total() -> int:
+    """Sends whose attachments could not be checked, since process start.
+    Every increment also logs a WARNING naming the reason."""
+    return _UNVERIFIED["total"]
+
+
+def _count_unverified(reason: str, refs) -> None:
+    _UNVERIFIED["total"] += 1
+    logger.warning(
+        "chat: attachment ownership NOT verified (%s) for %d ref(s); the send "
+        "proceeds. stapel-cdn >= 0.31.0 provides cdn.ownership.",
+        reason, len(refs),
+    )
+
+
+def _shared_in_thread(conversation, refs: set[str]) -> set[str]:
+    """The refs already on a live message of ``conversation``.
+
+    Every participant can already resolve those, so attaching one again
+    (quoting a document, an operator forwarding a customer's file within the
+    support thread) discloses nothing new. Only refs that failed the
+    ownership check reach this, so the scan runs on the refusal path only.
+    """
+    if conversation is None or not refs:
+        return set()
+    from .models import Message
+
+    found: set[str] = set()
+    rows = (
+        Message.objects.filter(conversation_id=conversation.pk, deleted_at__isnull=True)
+        .exclude(attachments=[])
+        .values_list("attachments", flat=True)
+    )
+    for attachments in rows.iterator(chunk_size=500):
+        for item in attachments or []:
+            key = item.get("key") if isinstance(item, dict) else item
+            if key in refs:
+                found.add(key)
+        if found == refs:
+            break
+    return found
+
+
+def verify_ownership(attachments: list[dict], *, sender, conversation=None) -> None:
+    """Refuse a send that shares a private object the sender does not own.
+
+    One ``cdn.ownership`` call for every media ref of the message. Raises
+    :class:`AttachmentNotOwned` naming the first offending index when a
+    private or protected ref is neither the sender's nor already shared in
+    this conversation, or does not exist at all. Public refs pass. A CDN
+    that does not answer (no such Function before stapel-cdn 0.31.0, an
+    outage, a malformed answer) leaves the send as it was and is counted
+    (:func:`ownership_unverified_total`).
+    """
+    indexed = [
+        (i, a["key"]) for i, a in enumerate(attachments)
+        if _is_media(a) and isinstance(a.get("key"), str)
+    ]
+    if not indexed or sender is None or getattr(sender, "pk", None) is None:
+        return
+    refs = list(dict.fromkeys(ref for _, ref in indexed))
+    try:
+        from stapel_core.comm import call
+
+        answer = call("cdn.ownership", {"refs": refs, "owner_id": str(sender.pk)}) or {}
+        items = {
+            item.get("ref"): item
+            for item in (answer.get("items") or [])
+            if isinstance(item, dict)
+        }
+    except Exception as exc:  # noqa: BLE001 - absent or failing provider
+        _count_unverified(type(exc).__name__, refs)
+        return
+
+    refused: set[str] = set()
+    unanswered: list[str] = []
+    for ref in refs:
+        item = items.get(ref)
+        if item is None or "owned" not in item:
+            unanswered.append(ref)
+        elif not item.get("exists"):
+            refused.add(ref)
+        elif item.get("visibility") in OWNED_VISIBILITIES and item.get("owned") is not True:
+            refused.add(ref)
+    if unanswered:
+        _count_unverified("incomplete answer", unanswered)
+    if refused:
+        refused -= _shared_in_thread(conversation, refused)
+    for index, ref in indexed:
+        if ref in refused:
+            raise AttachmentNotOwned(index)
 
 
 # ── references at rest, URLs at read ─────────────────────────────────────

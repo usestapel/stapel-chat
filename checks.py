@@ -29,6 +29,10 @@ with nothing anywhere saying so. They are ERRORs and there is no setting that
 downgrades them: a silent polling fallback is the defect, so the configuration
 that produces one must not boot. E015/E016 validate the two open registries at
 boot rather than at send time.
+
+W006 (security) says attachment ownership checks are inactive: with CDN
+metadata on, ``cdn.ownership`` (stapel-cdn 0.31.0+) is provably unreachable
+from this process. Sends keep working and log each unverified one.
 """
 from django.core import checks
 from stapel_core.django.scope import check_shipped_scope_provider
@@ -675,5 +679,43 @@ def check_block_enforcement(app_configs, **kwargs):
                  "over the bus, or before it ships. Set 'required' to make "
                  "its absence a boot failure instead of an advisory.",
             id="stapel_chat.W003",
+        )
+    ]
+
+
+@checks.register(checks.Tags.security)
+def check_attachment_ownership(app_configs, **kwargs):
+    """W006 — a sender's attachments cannot be checked for ownership.
+
+    With CDN metadata on, a send asks ``cdn.ownership`` (stapel-cdn 0.31.0+)
+    whether every attached private object is the sender's. Where this process
+    can prove the Function is unreachable (``inprocess`` and ``http``
+    transports), it says so here: sends keep working, unverified, and each
+    one logs a WARNING. Over a bus transport nothing at boot can see the
+    remote provider's version — the runtime WARNING is the signal there.
+    """
+    from stapel_core.comm import comm_setting, function_unreachable_reason
+
+    from .conf import chat_settings
+
+    if not chat_settings.ATTACHMENTS or str(chat_settings.ATTACHMENT_METADATA) != "cdn":
+        return []
+    transport = str(comm_setting("FUNCTION_TRANSPORT", "inprocess") or "")
+    if transport not in _DECIDABLE_FUNCTION_TRANSPORTS:
+        return []
+    reason = function_unreachable_reason("cdn.ownership")
+    if reason is None:
+        return []
+    return [
+        checks.Warning(
+            "Attachment ownership checks are inactive: cdn.ownership is not "
+            f"reachable here ({reason}). A sender can attach a private object "
+            "(a document, a voice note) they did not upload, and every reader "
+            "of the thread is then handed a link to it. Sends are not refused; "
+            "each unverified one logs a WARNING.",
+            hint="Upgrade stapel-cdn to >= 0.31.0 (the release that provides "
+                 "cdn.ownership) and, over http, route cdn.ownership like "
+                 "cdn.describe_many.",
+            id="stapel_chat.W006",
         )
     ]
