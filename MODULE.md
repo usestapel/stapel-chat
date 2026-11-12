@@ -306,6 +306,21 @@ stored facts intact — that item degrades, the thread does not. Works the same
 against a CDN that still hands out permanent URLs: nothing is detected, every
 read resolves.
 
+**A link that does not expire — `href`.** Every attachment on the wire carries
+`href`, this module's own route
+`GET /conversations/{id}/messages/{message_id}/attachments/{index}`: it repeats
+the history's checks (participant, the caller's cleared mark, not a tombstone)
+on every request and answers `302` to a URL resolved for that request
+(`Cache-Control: private, no-store`; `404 chat_attachment_not_found`,
+`503 chat_attachment_unavailable` when the CDN did not answer). Anything kept
+longer than a page view — a download button, an e-mail, a push notification, a
+webhook — uses `href`, never a `variants[].url`. Chat owns this route rather
+than linking to the app's message screen because it does not know the host's
+front-end routes, and a redirect behind the participation check is the one
+link it can promise works later. The `chat.message` / `chat.message.edited`
+Actions carry the reference form plus `href`: a bus event is consumed after an
+unknown delay, so it holds no signed URL.
+
 Rows written before 0.12.0 still hold the snapshot's URLs at rest. They read
 correctly without any migration (the read drops them); to leave no expired or
 formerly public URL in the table, run once, at any time, while serving:

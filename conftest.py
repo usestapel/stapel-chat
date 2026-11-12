@@ -54,6 +54,21 @@ def _fresh_attachment_snapshot_cache():
 
 
 @pytest.fixture
+def cdn(settings):
+    """A fake ``cdn.describe_many`` that signs a fresh link per call, with the
+    snapshot cache off so every read reaches it
+    (``tests/test_attachment_urls.py``)."""
+    from stapel_core.comm import function_registry
+
+    from stapel_chat.tests.test_attachment_urls import FakeCdn
+
+    settings.STAPEL_CHAT = {"ATTACHMENT_URL_CACHE_S": 0}
+    fake = FakeCdn().install()
+    yield fake
+    function_registry._providers.pop("cdn.describe_many", None)
+
+
+@pytest.fixture
 def api_client():
     from rest_framework.test import APIClient
     return APIClient()

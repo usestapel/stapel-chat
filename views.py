@@ -6,7 +6,8 @@ see and what ``scope_key`` a new conversation gets. History and conversation
 lists are anchor-paginated (core ``AnchorPagination``): message history anchors
 on ``seq`` — the canonical anchor case — and supports both directions.
 """
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from django.http import HttpResponseRedirect
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import permissions, status
 from rest_framework.views import APIView
 from stapel_core.django.api.errors import StapelErrorResponse, StapelResponse
@@ -24,7 +25,13 @@ from stapel_core.django.api.views import SerializerSeamMixin
 
 from . import services, subjects
 from .activity import UnknownActivityState
-from .attachments import InvalidAttachment, UnknownAttachmentType, resolve_messages
+from .attachments import (
+    REASON_CDN_UNAVAILABLE,
+    InvalidAttachment,
+    UnknownAttachmentType,
+    attachment_href,
+    resolve_messages,
+)
 from .conf import chat_settings
 from .dto import (
     AttachmentResponse,
@@ -57,6 +64,8 @@ from .errors import (
     ERR_403_SEND_REFUSED,
     ERR_409_ALREADY_ASSIGNED,
     ERR_503_BLOCKS_UNAVAILABLE,
+    ERR_404_ATTACHMENT_NOT_FOUND,
+    ERR_503_ATTACHMENT_UNAVAILABLE,
 )
 from .models import (
     Conversation,
@@ -969,6 +978,73 @@ class MessageDetailView(SerializerSeamMixin, APIView):
             return StapelErrorResponse(403, ERR_403_NOT_AUTHOR)
         response_cls = self.get_response_serializer_class()
         return StapelResponse(response_cls(message_to_dto(msg)))
+
+
+def _open_url(attachment: dict):
+    """The URL an attachment opens at: the original rung, else the largest
+    rung, else a poster. ``None`` when the read resolved none."""
+    rungs = [
+        v for v in (attachment.get("variants") or [])
+        if isinstance(v, dict) and v.get("url")
+    ]
+    for rung in rungs:
+        if rung.get("tier") == "original":
+            return rung["url"]
+    sized = [r for r in rungs if isinstance(r.get("tier"), int)]
+    if sized:
+        return max(sized, key=lambda r: r["tier"])["url"]
+    if rungs:
+        return rungs[0]["url"]
+    return attachment.get("poster_url") or None
+
+
+@extend_schema(tags=["Chat"])
+class MessageAttachmentView(SerializerSeamMixin, APIView):
+    """Open one attachment: a redirect to a URL resolved for this request.
+
+    The link that does not expire. A private CDN object is served by a signed
+    URL that lives minutes, so anything kept longer than a page view — a
+    download button, an e-mail, a push notification, a bus event — carries
+    this route instead (``href`` on every attachment). Each request repeats
+    the history's own checks (participant, the caller's cleared mark, not a
+    tombstone) before anything is resolved, and answers ``302`` to the fresh
+    URL with ``Cache-Control: private, no-store``.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        request=None,
+        responses={302: OpenApiResponse(description="Redirect to a freshly resolved URL")},
+    )
+    def get(self, request, conversation_id, message_id, index):  # noqa: R007
+        conv = _get_conversation(request, conversation_id)
+        if conv is None:
+            return StapelErrorResponse(404, ERR_404_CONVERSATION_NOT_FOUND)
+        participant = _my_participant(conv, request.user)
+        if participant is None:
+            return StapelErrorResponse(403, ERR_403_NOT_PARTICIPANT)
+        msg = services.visible_messages(
+            Message.objects.filter(pk=message_id, conversation=conv),
+            cleared_at=participant.cleared_at,
+        ).first()
+        if msg is None:
+            return StapelErrorResponse(404, ERR_404_MESSAGE_NOT_FOUND)
+        if msg.deleted_at is not None or index >= len(msg.attachments or []):
+            return StapelErrorResponse(404, ERR_404_ATTACHMENT_NOT_FOUND)
+        href = attachment_href(conv.id, msg.pk, index)
+        attachment = next(
+            (a for a in resolve_messages([msg])[str(msg.pk)] if a.get("href") == href),
+            None,
+        )
+        url = _open_url(attachment) if attachment else None
+        if url is None:
+            if attachment and attachment.get("meta_reason") == REASON_CDN_UNAVAILABLE:
+                return StapelErrorResponse(503, ERR_503_ATTACHMENT_UNAVAILABLE)
+            return StapelErrorResponse(404, ERR_404_ATTACHMENT_NOT_FOUND)
+        response = HttpResponseRedirect(url)
+        response["Cache-Control"] = "private, no-store"
+        return response
 
 
 @extend_schema(tags=["Chat"])

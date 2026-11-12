@@ -65,14 +65,6 @@ class FakeCdn:
         return self
 
 
-@pytest.fixture
-def cdn(settings):
-    settings.STAPEL_CHAT = {"ATTACHMENT_URL_CACHE_S": 0}
-    fake = FakeCdn().install()
-    yield fake
-    function_registry._providers.pop("cdn.describe_many", None)
-
-
 def _send(conv, sender, *keys):
     return services.post_message(
         conversation=conv,

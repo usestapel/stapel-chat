@@ -22,6 +22,16 @@ New tuning setting `ATTACHMENT_URL_CACHE_S` (60): how long a snapshot is
 reused across reads. The `chat.message` / `chat.message.edited` Actions and
 any payload built without a read carry the stored reference form.
 
+### Added — `href`: a link to an attachment that does not expire
+
+`GET /conversations/{id}/messages/{message_id}/attachments/{index}` checks the
+caller's access to the message like the history does and redirects (`302`,
+`private, no-store`) to a URL resolved for that request; `404
+chat_attachment_not_found`, `503 chat_attachment_unavailable`. Every attachment
+carries its route as `href` (REST, socket, Actions). Download links, e-mails,
+push notifications and webhooks use it instead of a signed URL. The
+`chat.message` / `chat.message.edited` Actions hold no signed URL.
+
 ### Added — `chat_strip_attachment_urls`
 
 `manage.py chat_strip_attachment_urls [--batch-size N] [--limit N] [--dry-run]`

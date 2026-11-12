@@ -511,6 +511,53 @@
         }
       }
     },
+    "/chat/api/v1/conversations/{conversation_id}/messages/{message_id}/attachments/{index}": {
+      "get": {
+        "operationId": "chat_api_v1_conversations_messages_attachments_retrieve",
+        "description": "Open one attachment: a redirect to a URL resolved for this request.\n\nThe link that does not expire. A private CDN object is served by a signed\nURL that lives minutes, so anything kept longer than a page view — a\ndownload button, an e-mail, a push notification, a bus event — carries\nthis route instead (``href`` on every attachment). Each request repeats\nthe history's own checks (participant, the caller's cleared mark, not a\ntombstone) before anything is resolved, and answers ``302`` to the fresh\nURL with ``Cache-Control: private, no-store``.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to a freshly resolved URL"
+          }
+        }
+      }
+    },
     "/chat/api/v1/conversations/{conversation_id}/read": {
       "post": {
         "operationId": "chat_api_v1_conversations_read_create",

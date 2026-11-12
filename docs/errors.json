@@ -386,6 +386,14 @@
     "owner": "stapel_core"
   },
   {
+    "code": "error.404.chat_attachment_not_found",
+    "status": 404,
+    "params": [],
+    "remediation": "retry",
+    "en": "This attachment does not exist or can no longer be opened",
+    "owner": "stapel_chat"
+  },
+  {
     "code": "error.404.chat_conversation_not_found",
     "status": 404,
     "params": [],
@@ -530,6 +538,14 @@
     "remediation": "contact_support",
     "en": "Something went wrong",
     "owner": "stapel_core"
+  },
+  {
+    "code": "error.503.chat_attachment_unavailable",
+    "status": 503,
+    "params": [],
+    "remediation": "retry",
+    "en": "This attachment is temporarily unavailable, please try again",
+    "owner": "stapel_chat"
   },
   {
     "code": "error.503.chat_blocks_unavailable",

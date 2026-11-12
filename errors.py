@@ -35,6 +35,8 @@ ERR_403_SEND_REFUSED = "error.403.chat_send_refused"
 # never a delivered message: an outage is not consent, and answering 403 would
 # tell a sender they are blocked when in fact a service is down.
 ERR_503_BLOCKS_UNAVAILABLE = "error.503.chat_blocks_unavailable"
+ERR_404_ATTACHMENT_NOT_FOUND = "error.404.chat_attachment_not_found"
+ERR_503_ATTACHMENT_UNAVAILABLE = "error.503.chat_attachment_unavailable"
 
 STAPEL_CHAT_ERRORS = {
     ERR_400_INVALID_KIND: "Unknown conversation kind",
@@ -60,6 +62,8 @@ STAPEL_CHAT_ERRORS = {
     ERR_409_ALREADY_ASSIGNED: "This support conversation is already assigned",
     ERR_403_SEND_REFUSED: "This message could not be sent",
     ERR_503_BLOCKS_UNAVAILABLE: "Messaging is temporarily unavailable, please try again",
+    ERR_404_ATTACHMENT_NOT_FOUND: "This attachment does not exist or can no longer be opened",
+    ERR_503_ATTACHMENT_UNAVAILABLE: "This attachment is temporarily unavailable, please try again",
 }
 
 register_service_errors(STAPEL_CHAT_ERRORS)
@@ -89,4 +93,6 @@ __all__ = [
     "ERR_409_ALREADY_ASSIGNED",
     "ERR_403_SEND_REFUSED",
     "ERR_503_BLOCKS_UNAVAILABLE",
+    "ERR_404_ATTACHMENT_NOT_FOUND",
+    "ERR_503_ATTACHMENT_UNAVAILABLE",
 ]

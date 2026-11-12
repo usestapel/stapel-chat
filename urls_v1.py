@@ -15,6 +15,7 @@ from .views import (
     ConversationDetailView,
     ConversationListCreateView,
     MarkReadView,
+    MessageAttachmentView,
     MessageDetailView,
     MessageListCreateView,
     RejoinConversationView,
@@ -44,6 +45,12 @@ urlpatterns = [
         "conversations/<uuid:conversation_id>/messages/<uuid:message_id>",
         MessageDetailView.as_view(),
         name="chat-message-detail",
+    ),
+    path(
+        "conversations/<uuid:conversation_id>/messages/<uuid:message_id>"
+        "/attachments/<int:index>",
+        MessageAttachmentView.as_view(),
+        name="chat-message-attachment",
     ),
     path(
         "conversations/<uuid:conversation_id>/read",

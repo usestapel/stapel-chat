@@ -603,7 +603,7 @@
       ]
     }
   ],
-  "operations_total": 16,
+  "operations_total": 17,
   "requires": [
     {
       "module": "stapel-core",
