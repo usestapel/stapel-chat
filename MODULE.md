@@ -299,12 +299,25 @@ edit responses, the live socket frame and the socket replay — one batched
 decided the reader may see those messages. A row written before 0.12.0 still
 carries a snapshot's URLs; the read drops them and resolves like any other, so
 it needs no migration to work (`chat_strip_attachment_urls` removes them at
-rest, see below). Snapshots are cached `ATTACHMENT_URL_CACHE_S` (60 s) per
+rest, below). Snapshots are cached `ATTACHMENT_URL_CACHE_S` (60 s) per
 ref; keep it well under the CDN's TTL. A ref the CDN did not answer about on
 this read is `meta_reason: "cdn_unavailable"` with empty `variants` and its
 stored facts intact — that item degrades, the thread does not. Works the same
 against a CDN that still hands out permanent URLs: nothing is detected, every
 read resolves.
+
+Rows written before 0.12.0 still hold the snapshot's URLs at rest. They read
+correctly without any migration (the read drops them); to leave no expired or
+formerly public URL in the table, run once, at any time, while serving:
+
+```
+manage.py chat_strip_attachment_urls [--batch-size 500] [--limit N] [--dry-run]
+```
+
+It walks the table in primary-key batches, each its own short transaction that
+locks only the rows it rewrites and recomputes them from the locked value (a
+message deleted meanwhile stays empty); tombstones are skipped, `rev_seq` does
+not move, a rerun rewrites nothing.
 
 **Claiming, and why it is not optional (0.9.2).** The CDN is a reference
 counter with a collector attached: an upload is stamped `unreferenced_since`

@@ -22,6 +22,13 @@ New tuning setting `ATTACHMENT_URL_CACHE_S` (60): how long a snapshot is
 reused across reads. The `chat.message` / `chat.message.edited` Actions and
 any payload built without a read carry the stored reference form.
 
+### Added — `chat_strip_attachment_urls`
+
+`manage.py chat_strip_attachment_urls [--batch-size N] [--limit N] [--dry-run]`
+removes the URLs that rows written before this release still hold at rest.
+Not needed for correctness (reads already ignore them); bounded batches, one
+short transaction each, tombstones skipped, `rev_seq` unchanged, rerunnable.
+
 ## [0.11.0] — 2026-10-22
 
 ### Fixed — a removed participant's socket stops writing and listening
