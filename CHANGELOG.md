@@ -32,6 +32,14 @@ carries its route as `href` (REST, socket, Actions). Download links, e-mails,
 push notifications and webhooks use it instead of a signed URL. The
 `chat.message` / `chat.message.edited` Actions hold no signed URL.
 
+### Security — only a reader of the message gets a resolved URL
+
+The CDN signs for whoever asks it with a ref, so chat decides first: every
+path that resolves attachment URLs runs after the participant check (assigned
+operators for support threads, the reader's cleared mark honoured), and a
+containment test walks every mounted route as a stranger and asserts no
+describe is reached.
+
 ### Added — `chat_strip_attachment_urls`
 
 `manage.py chat_strip_attachment_urls [--batch-size N] [--limit N] [--dry-run]`

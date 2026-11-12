@@ -321,6 +321,20 @@ link it can promise works later. The `chat.message` / `chat.message.edited`
 Actions carry the reference form plus `href`: a bus event is consumed after an
 unknown delay, so it holds no signed URL.
 
+**Who gets a resolved URL is decided here.** stapel-cdn's describe signs a
+link for whoever calls it with a ref, so every path that resolves one runs
+after this module's own access decision: the history page, the send/edit
+answer and the attachment link check the caller is a participant (an operator
+only once assigned to the support thread) and honour their cleared mark; the
+live frame goes to subscribers the socket authorized as participants, and a
+replay runs after that check; `chat.moderation_content` returns refs, never
+URLs, and leaves who may look to moderation's policy. The Actions carry no
+signed URL. `tests/test_attachment_authorization.py` walks every mounted route
+with every method as a stranger and asserts no describe is reached. Not
+closed here: a sender may attach a ref they did not upload, and stapel-cdn's
+own `POST /describe/` signs for any signed-in caller holding a ref — both need
+an ownership answer from stapel-cdn.
+
 Rows written before 0.12.0 still hold the snapshot's URLs at rest. They read
 correctly without any migration (the read drops them); to leave no expired or
 formerly public URL in the table, run once, at any time, while serving:
