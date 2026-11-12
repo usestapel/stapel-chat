@@ -1095,7 +1095,10 @@ installed, so it can never be what tells you a dependency is missing.
 `tests/test_cdn_seam.py` sends a voice note uploaded through the CDN's own
 intake and reads it back through chat after a shortened
 `SIGNED_MEDIA_TTL_SECONDS`: the earlier link has expired, a fresh read plays,
-a stranger gets nothing. Against a CDN that still hands out permanent URLs the
+a stranger gets nothing — neither through chat nor through the CDN's own
+`POST /describe/` — and a stranger who attaches the uploader's voice note in a
+thread of their own is refused (against a CDN with `cdn.ownership`; against
+0.30.0 the send goes through and is counted unverified). Against a CDN that still hands out permanent URLs the
 same test asserts the permanent path.
 
 Two rules hold in this suite and are worth reusing:

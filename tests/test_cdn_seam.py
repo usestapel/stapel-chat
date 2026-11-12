@@ -171,3 +171,70 @@ def test_a_cdn_that_hands_out_permanent_urls_resolves_the_same(
     assert url.startswith("/media/private/")
     redirect = reader.get(sent["attachments"][0]["href"])
     assert redirect.status_code == 302 and redirect["Location"] == url
+
+
+def _real_ownership():
+    """Register the installed stapel-cdn's own ``cdn.ownership``, if it has
+    one (0.31.0+). Returns whether it did."""
+    from stapel_core.comm import function, function_registry
+
+    from stapel_cdn import functions as cdn_functions
+
+    if not hasattr(cdn_functions, "ownership"):
+        return False
+    function_registry._providers.pop("cdn.ownership", None)
+    function("cdn.ownership", schema=cdn_functions.OWNERSHIP_SCHEMA)(
+        cdn_functions.ownership
+    )
+    return True
+
+
+@requires_cdn
+def test_attaching_someone_elses_voice_note_is_refused(
+    real_cdn, user, other_user, stranger
+):
+    """The stranger learns the owner's ref and attaches it in their own
+    thread with the owner's counterpart: the CDN says it is not theirs."""
+    from stapel_chat import attachments
+
+    ref = _upload_voice(_client(user))
+    conv = services.create_direct(owner=stranger, other_user_id=other_user.id)
+    checked = _real_ownership()
+    before = attachments.ownership_unverified_total()
+    r = _client(stranger).post(
+        f"/chat/api/v1/conversations/{conv.id}/messages",
+        {"body": "", "attachments": [{"key": ref, "type": "audio"}]},
+        format="json",
+    )
+    if checked:
+        assert r.status_code == 403, r.content
+        assert r.json()["localizable_error"] == "error.403.chat_attachment_not_owned"
+        assert r.json()["params"] == {"index": 0}
+        # The uploader's own send of the same ref goes through.
+        mine = services.create_direct(owner=user, other_user_id=other_user.id)
+        ok = _client(user).post(
+            f"/chat/api/v1/conversations/{mine.id}/messages",
+            {"body": "", "attachments": [{"key": ref, "type": "audio"}]},
+            format="json",
+        )
+        assert ok.status_code == 201, ok.content
+    else:
+        # stapel-cdn 0.30.0: no ownership answer; the send keeps working and
+        # is counted as unverified.
+        assert r.status_code == 201, r.content
+        assert attachments.ownership_unverified_total() == before + 1
+
+
+@requires_cdn
+def test_the_cdn_describe_route_withholds_a_strangers_voice_note(
+    real_cdn, user, stranger
+):
+    """The CDN's own browser describe no longer steps around chat's check."""
+    ref = _upload_voice(_client(user))
+    r = _client(stranger).post("/cdn/api/v1/describe/", {"refs": [ref]}, format="json")
+    assert r.status_code == 200
+    snapshot = r.json()["items"][ref]
+    if _cdn_signs_private_media() and _real_ownership():
+        assert snapshot["variants"] == []
+        assert snapshot["meta_reason"] == "not_authorized"
+        assert "/signed/" not in r.content.decode()
