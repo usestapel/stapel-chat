@@ -4,7 +4,17 @@ All notable changes to stapel-chat are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — proposed 0.12.0
+## [0.12.0] — 2026-11-13
+
+Minor (pre-1.0: breaking). No migration.
+
+**Breaking:** message attachments store a CDN reference and resolve URLs on
+every read; URLs stored by earlier versions are no longer served, and the
+`chat.message` / `chat.message.edited` Actions carry `href` instead of signed
+URLs. A send asks stapel-cdn's `cdn.ownership` (stapel-cdn 0.31.0+) and
+refuses a private object the sender does not own (`403
+error.403.chat_attachment_not_owned`); against an older stapel-cdn sends keep
+working unverified (`stapel_chat.W006`).
 
 ### Changed — attachment URLs are resolved per read, never stored (behaviour change)
 
