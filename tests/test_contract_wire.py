@@ -589,6 +589,39 @@ def _delete_attachment_message(call):
     )
 
 
+# ── markers and activity ─────────────────────────────────────────────────────
+
+
+@recipe("POST", "/conversations/{conversation_id}/read")
+def _mark_read(call):
+    owner, other, conv = direct()
+    message = say(conv, other, "seen it?")
+    return call(
+        client_for(owner),
+        params={"conversation_id": conv.id},
+        data={"upto_seq": message.seq, "delivered_upto_seq": message.seq},
+    )
+
+
+@empty_state("POST", "/conversations/{conversation_id}/read")
+def _mark_read_nothing(call):
+    """Nothing written yet: neither marker moves, both flags answer false."""
+    owner, _other, conv = direct(subject=False)
+    return call(client_for(owner), params={"conversation_id": conv.id}, data={"upto_seq": 0})
+
+
+@recipe("POST", "/conversations/{conversation_id}/activity")
+def _activity(call):
+    owner, _other, conv = direct()
+    return call(client_for(owner), params={"conversation_id": conv.id}, data={"state": "typing"})
+
+
+@empty_state("POST", "/conversations/{conversation_id}/activity")
+def _activity_idle(call):
+    owner, _other, conv = direct(subject=False)
+    return call(client_for(owner), params={"conversation_id": conv.id}, data={"state": "idle"})
+
+
 # ── the support surface ──────────────────────────────────────────────────────
 
 

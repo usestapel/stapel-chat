@@ -243,7 +243,14 @@
         ],
         "responses": {
           "200": {
-            "description": "No response body"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
+              }
+            },
+            "description": ""
           }
         }
       }
@@ -603,7 +610,14 @@
         ],
         "responses": {
           "200": {
-            "description": "No response body"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkReadResponse"
+                }
+              }
+            },
+            "description": ""
           }
         }
       }
@@ -824,6 +838,24 @@
         },
         "required": [
           "state"
+        ]
+      },
+      "ActivityResponse": {
+        "type": "object",
+        "description": "The announced activity and how long a client shows it.",
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "A registered activity state, e.g. typing."
+          },
+          "ttl_s": {
+            "type": "integer",
+            "description": "Seconds the state stays shown without a refresh."
+          }
+        },
+        "required": [
+          "state",
+          "ttl_s"
         ]
       },
       "AttachmentResponse": {
@@ -1128,6 +1160,24 @@
           "upto_seq"
         ]
       },
+      "MarkReadResponse": {
+        "type": "object",
+        "description": "Whether each marker moved (a marker never goes backwards).",
+        "properties": {
+          "updated": {
+            "type": "boolean",
+            "description": "The read marker moved."
+          },
+          "delivered": {
+            "type": "boolean",
+            "description": "The delivery marker moved."
+          }
+        },
+        "required": [
+          "delivered",
+          "updated"
+        ]
+      },
       "MessageResponse": {
         "type": "object",
         "description": "A single message — or its tombstone.\n\nA deleted message is still returned: same ``id``, same ``seq``, empty\n``body``, empty ``attachments``, ``deleted=true``. That is deliberate, and\nit is what a client cache needs — an id that stops arriving is an id\nnobody can purge.",
@@ -1233,6 +1283,7 @@
               }
             ],
             "nullable": true,
+            "example": null,
             "description": "Anchor value for next page. The raw value of the ordering field: a string for a datetime anchor, an integer for a sequence one. Set `anchor_type` on the paginator to narrow this."
           },
           "prev_anchor": {
@@ -1245,19 +1296,23 @@
               }
             ],
             "nullable": true,
+            "example": null,
             "description": "Anchor value for previous page. The raw value of the ordering field: a string for a datetime anchor, an integer for a sequence one. Set `anchor_type` on the paginator to narrow this."
           },
           "has_next": {
             "type": "boolean",
-            "description": "Whether there are more items after this page"
+            "description": "Whether there are more items after this page",
+            "example": false
           },
           "has_prev": {
             "type": "boolean",
-            "description": "Whether there are items before this page"
+            "description": "Whether there are items before this page",
+            "example": false
           },
           "count": {
             "type": "integer",
-            "description": "Number of items in current page"
+            "description": "Number of items in current page",
+            "example": 1
           }
         },
         "required": [
@@ -1286,6 +1341,7 @@
               }
             ],
             "nullable": true,
+            "example": null,
             "description": "Anchor value for next page. The raw value of the ordering field: a string for a datetime anchor, an integer for a sequence one. Set `anchor_type` on the paginator to narrow this."
           },
           "prev_anchor": {
@@ -1298,19 +1354,23 @@
               }
             ],
             "nullable": true,
+            "example": null,
             "description": "Anchor value for previous page. The raw value of the ordering field: a string for a datetime anchor, an integer for a sequence one. Set `anchor_type` on the paginator to narrow this."
           },
           "has_next": {
             "type": "boolean",
-            "description": "Whether there are more items after this page"
+            "description": "Whether there are more items after this page",
+            "example": false
           },
           "has_prev": {
             "type": "boolean",
-            "description": "Whether there are items before this page"
+            "description": "Whether there are items before this page",
+            "example": false
           },
           "count": {
             "type": "integer",
-            "description": "Number of items in current page"
+            "description": "Number of items in current page",
+            "example": 1
           }
         },
         "required": [

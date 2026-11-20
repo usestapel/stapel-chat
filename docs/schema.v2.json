@@ -1,0 +1,2222 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "",
+    "version": "0.0.0",
+    "x-stapel-contract": 2
+  },
+  "paths": {
+    "/chat/api/v1/conversations": {
+      "get": {
+        "operationId": "chat_api_v1_conversations_list",
+        "description": "List the requesting user's conversations, or create one.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "name": "anchor",
+            "required": false,
+            "in": "query",
+            "description": "Anchor value to paginate from (exclusive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "direction",
+            "required": false,
+            "in": "query",
+            "description": "Pagination direction",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "next",
+                "prev",
+                "center"
+              ],
+              "default": "next"
+            }
+          },
+          {
+            "in": "query",
+            "name": "left",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "`true` returns ONLY the threads the caller has LEFT — the exact complement of the default list, never a widening of it, so a thread is on one of the two and never on both. It exists because leaving destroys nothing: without a listing that shows them, a thread left by mistake is reachable only by a URL somebody kept. Ordered by WHEN THE CALLER LEFT, newest departure first — so `anchor` is that timestamp on this list, not `updated_at` — and every row carries it as `left_at`. `search` and `unread` compose exactly as they do on the default list. Any other value is the default list, unchanged. `POST /conversations/{id}/rejoin` is the way back."
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Number of items (default 50, max 200)",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Case-insensitive substring over the three things an inbox row draws: the COUNTERPART'S DISPLAY NAME (the user-model fields STAPEL_CHAT['SEARCH_NAME_FIELDS'] names — username, first name and last name out of the box), the SUBJECT CARD'S TITLE where the thread carries a subject (the fields that subject type's `search_fields` policy names, `title` by default), and the LAST MESSAGE'S body — the very text that row's `last_message.body_preview` ships, one rule for both. A tombstone is never matched (it draws as deleted), and neither is a system marker, unless this deployment gave that marker words in STAPEL_CHAT['SYSTEM_LINE_LABELS'] — then the row draws the label and those words find it. Filters BEFORE paging: anchor, direction and limit walk the filtered list and mean exactly what they mean without a search. Blank or whitespace-only is no search at all. Title matching covers the newest STAPEL_CHAT['SEARCH_SUBJECT_SCAN'] subject threads (500 by default); older ones are still matched by name and last line."
+          },
+          {
+            "in": "query",
+            "name": "unread",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "`true` returns only conversations whose `unread_count` is above zero for the caller — the same rule that produces the number on each row (messages past your read marker, written by somebody else, tombstones and system lines excluded). Any other value is no filter. Composes with `search` (both narrow, then the page is taken)."
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedConversationResponseList"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "x-stapel-pagination": {
+          "style": "anchor",
+          "items": "items",
+          "params": [
+            "anchor",
+            "direction",
+            "limit"
+          ]
+        }
+      },
+      "post": {
+        "operationId": "chat_api_v1_conversations_create",
+        "description": "List the requesting user's conversations, or create one.\n\n**Permissions:** `IsAuthenticated`",
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Bad Request",
+            "x-stapel-errors": [
+              "error.400.chat_incomplete_subject",
+              "error.400.chat_invalid_direct",
+              "error.400.chat_invalid_kind",
+              "error.400.chat_kind_disabled",
+              "error.400.chat_unknown_subject_type"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_send_refused"
+            ]
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Service Unavailable",
+            "x-stapel-errors": [
+              "error.503.chat_blocks_unavailable"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/conversations/{conversation_id}": {
+      "get": {
+        "operationId": "chat_api_v1_conversations_retrieve",
+        "description": "Retrieve a single conversation, or LEAVE it (participant-only).\n\n``DELETE`` is the caller leaving — never a hard delete of the thread. It\nanswered ``405`` until 0.8.5, so a person had no way out of a\nconversation at all and a test fixture had no way to clean one up. What\nit does and does not touch is stated once, in\n:func:`stapel_chat.services.leave_conversation`; the short version is\nthat it hides the thread from the caller and takes nothing away from\nanybody else. Since 0.8.6 it is undoable: the hidden thread is listed by\n``GET /conversations?left=true`` and put back by\n:class:`RejoinConversationView`. Staff erasure is not on this surface:\nuser data has one\ndeletion path in this fleet (``user.deleted`` →\n:class:`~stapel_chat.gdpr.ChatGDPRProvider`), and a second door onto the\nsame rows is a second door to get wrong.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_participant"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          }
+        }
+      },
+      "delete": {
+        "operationId": "chat_api_v1_conversations_destroy",
+        "description": "Leave the conversation. ``204``, and ``204`` again on a retry.\n\nIdempotent on purpose: a client that lost the response and retried,\nand a client leaving a thread it already left, are the same request\nand get the same answer. A second call posts no second system line —\nthe service returns False and writes nothing.\n\nA caller who is not a party gets ``403`` with the module's one\nmembership key, the same answer ``GET`` on this exact URL gives them.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No response body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_participant"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/conversations/{conversation_id}/activity": {
+      "post": {
+        "operationId": "chat_api_v1_conversations_activity_create",
+        "description": "Announce \"typing…\" (or any registered activity) to the conversation.\n\nNothing is stored and nothing is returned but the resolved TTL. The\nendpoint exists for parity — a client whose socket is momentarily down can\nstill say it is typing — and it is explicitly *not* the intended path:\nan activity state is worth less than the round trip that carries it, which\nis why the socket's ``activity`` frame is the one a UI should use.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivityRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivityRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Bad Request",
+            "x-stapel-errors": [
+              "error.400.chat_unknown_activity_state"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_participant"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/conversations/{conversation_id}/clear": {
+      "post": {
+        "operationId": "chat_api_v1_conversations_clear_create",
+        "description": "Clear your own history of a thread — ``POST /conversations/{id}/clear``\n-> ``204``.\n\nThe standard messenger affordance, and standard in what it does NOT do.\nThe caller's participant row is stamped ``cleared_at`` and **no message is\ndeleted, edited or touched in any way**: everything created at or before\nthat instant simply stops being served to this caller — it leaves their\nmessage list, their ``unread_count``, their ``last_message`` preview and\ntheir ``?search=``. The other participant's thread does not change by a\nfield. This is why it exists as a mark rather than a delete: a thread is\nthe record of a deal between two people, a participant may erase only the\nwords they wrote themselves (``error.403.chat_not_author``), and nobody at\nall may erase the system lines — a \"clear history\" that removed rows would\nhand either party exactly the power the rest of this module refuses them.\n\nThe thread stays on the list, live and writable. The mark is a floor on\n``created_at``, never a state on a message, so the next line either side\nwrites is after it and is listed, counted and previewed normally — which\nis the difference between this and leaving (``DELETE`` on the same URL,\nwhich takes the thread off the list and leaves the history alone: the\nexact opposite half).\n\n**Not idempotent, on purpose.** Clearing again moves the mark to now, and\na client that lost the response and retried has cleared a thread it had\njust cleared — which changes nothing it can see unless something arrived\nin between, in which case moving the mark is what the person asked for.\n``204`` every time, because there is nothing to say: the new mark is on\nthe conversation (``cleared_at``) and on the caller's own inbox stream\n(``chat.conversation.cleared``), which is where a second tab learns of it.\n\nA caller who is not a party gets ``403`` with the module's one membership\nkey, the same answer ``GET`` on this conversation gives them.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No response body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_participant"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/conversations/{conversation_id}/messages": {
+      "get": {
+        "operationId": "chat_api_v1_conversations_messages_list",
+        "description": "History (anchor by seq, both directions) or send a message.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "name": "anchor",
+            "required": false,
+            "in": "query",
+            "description": "Anchor value to paginate from (exclusive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "direction",
+            "required": false,
+            "in": "query",
+            "description": "Pagination direction",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "next",
+                "prev",
+                "center"
+              ],
+              "default": "next"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Number of items (default 50, max 200)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedMessageResponseList"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_participant"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          }
+        },
+        "x-stapel-pagination": {
+          "style": "anchor",
+          "items": "items",
+          "params": [
+            "anchor",
+            "direction",
+            "limit"
+          ]
+        }
+      },
+      "post": {
+        "operationId": "chat_api_v1_conversations_messages_create",
+        "description": "History (anchor by seq, both directions) or send a message.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Bad Request",
+            "x-stapel-errors": [
+              "error.400.chat_attachments_disabled",
+              "error.400.chat_body_too_long",
+              "error.400.chat_empty_message",
+              "error.400.chat_invalid_attachment",
+              "error.400.chat_invalid_reply",
+              "error.400.chat_unknown_attachment_type"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_attachment_not_owned",
+              "error.403.chat_not_participant",
+              "error.403.chat_send_refused"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Service Unavailable",
+            "x-stapel-errors": [
+              "error.503.chat_blocks_unavailable"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/conversations/{conversation_id}/messages/{message_id}": {
+      "patch": {
+        "operationId": "chat_api_v1_conversations_messages_partial_update",
+        "description": "Edit or delete one message. Author only.\n\nThe HTTP twin of the socket's ``edit`` / ``delete`` frames — same service\ncalls, same emits, same fan-out. It exists so a client that has just\nrehydrated over REST is not obliged to open a socket to correct a typo,\nnot because REST is the intended path: the socket is.\n\n``DELETE`` leaves a **tombstone** and answers ``200`` with the stripped\nmessage, not ``204``. The body is the point — the caller (and every other\nsubscriber, over the socket) is handed the exact row shape that says \"this\nid is now empty\", which is what a local cache purges against.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchedEditMessageRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchedEditMessageRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchedEditMessageRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Bad Request",
+            "x-stapel-errors": [
+              "error.400.chat_body_too_long",
+              "error.400.chat_empty_message",
+              "error.400.chat_message_deleted",
+              "error.400.chat_not_editable"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_author",
+              "error.403.chat_not_participant"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found",
+              "error.404.chat_message_not_found"
+            ]
+          }
+        }
+      },
+      "delete": {
+        "operationId": "chat_api_v1_conversations_messages_destroy",
+        "description": "Edit or delete one message. Author only.\n\nThe HTTP twin of the socket's ``edit`` / ``delete`` frames — same service\ncalls, same emits, same fan-out. It exists so a client that has just\nrehydrated over REST is not obliged to open a socket to correct a typo,\nnot because REST is the intended path: the socket is.\n\n``DELETE`` leaves a **tombstone** and answers ``200`` with the stripped\nmessage, not ``204``. The body is the point — the caller (and every other\nsubscriber, over the socket) is handed the exact row shape that says \"this\nid is now empty\", which is what a local cache purges against.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_author",
+              "error.403.chat_not_participant"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found",
+              "error.404.chat_message_not_found"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/conversations/{conversation_id}/messages/{message_id}/attachments/{index}": {
+      "get": {
+        "operationId": "chat_api_v1_conversations_messages_attachments_retrieve",
+        "description": "Open one attachment: a redirect to a URL resolved for this request.\n\nThe link that does not expire. A private CDN object is served by a signed\nURL that lives minutes, so anything kept longer than a page view — a\ndownload button, an e-mail, a push notification, a bus event — carries\nthis route instead (``href`` on every attachment). Each request repeats\nthe history's own checks (participant, the caller's cleared mark, not a\ntombstone) before anything is resolved, and answers ``302`` to the fresh\nURL with ``Cache-Control: private, no-store``.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to a freshly resolved URL"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_participant"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_attachment_not_found",
+              "error.404.chat_conversation_not_found",
+              "error.404.chat_message_not_found"
+            ]
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Service Unavailable",
+            "x-stapel-errors": [
+              "error.503.chat_attachment_unavailable"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/conversations/{conversation_id}/read": {
+      "post": {
+        "operationId": "chat_api_v1_conversations_read_create",
+        "description": "Advance the requesting user's read and delivery markers.\n\nBoth markers are durable rows and both fan out a live receipt when they\nmove — ``chat.read`` / ``chat.delivered`` on the conversation stream. The\nreceipt is a Signal, not an event: the truth is on the participant row and\ncomes back with the conversation, so nobody who was offline is owed a\nreplay of a tick mark.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkReadResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_participant"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/conversations/{conversation_id}/rejoin": {
+      "post": {
+        "operationId": "chat_api_v1_conversations_rejoin_create",
+        "description": "Take back a departure — ``POST /conversations/{id}/rejoin`` -> ``204``.\n\nThe way back from ``DELETE`` on the same thread, and the reason\n``?left=true`` exists at all: leaving destroys nothing, so a person who\npressed it by mistake needs a listing that shows the thread and a control\nthat undoes it, or the thread is reachable only by a URL they kept.\n\nA verb beside ``read`` rather than a ``PATCH`` on the conversation: this\nmodule spells its state transitions as named POSTs (``read``,\n``activity``, ``assign``, ``resolve``, ``reopen``), and a ``PATCH`` with a\n``left_at: null`` body would invite a caller to send some other instant —\na field whose only legal value is the one the server writes is not a field.\n\n``204``, and ``204`` again on a retry: a client that lost the response and\na client rejoining a thread it is already in are the same request. The\nthread comes back with the badge it had and where the departure left it —\n:func:`services.rejoin_conversation` touches the read markers and the\nconversation's ``updated_at`` not at all. A caller who is not a party gets\n``403`` with the module's one membership key: this is an undo, never a way\ninto a conversation nobody put you in.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No response body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_participant"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/support/conversations/{conversation_id}/assign": {
+      "post": {
+        "operationId": "chat_api_v1_support_conversations_assign_create",
+        "description": "Assign the requesting user (as operator) to a support conversation.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat support"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Bad Request",
+            "x-stapel-errors": [
+              "error.400.chat_kind_disabled"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_operator"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Conflict",
+            "x-stapel-errors": [
+              "error.409.chat_already_assigned"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/support/conversations/{conversation_id}/reopen": {
+      "post": {
+        "operationId": "chat_api_v1_support_conversations_reopen_create",
+        "description": "Reopen a resolved support conversation.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat support"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Bad Request",
+            "x-stapel-errors": [
+              "error.400.chat_kind_disabled"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_operator"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/support/conversations/{conversation_id}/resolve": {
+      "post": {
+        "operationId": "chat_api_v1_support_conversations_resolve_create",
+        "description": "Mark a support conversation resolved.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "tags": [
+          "Chat support"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Bad Request",
+            "x-stapel-errors": [
+              "error.400.chat_kind_disabled"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_operator"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Not Found",
+            "x-stapel-errors": [
+              "error.404.chat_conversation_not_found"
+            ]
+          }
+        }
+      }
+    },
+    "/chat/api/v1/support/queue": {
+      "get": {
+        "operationId": "chat_api_v1_support_queue_list",
+        "description": "The queue of unassigned, still-active support conversations.\n\n**Permissions:** `IsAuthenticated`",
+        "parameters": [
+          {
+            "name": "anchor",
+            "required": false,
+            "in": "query",
+            "description": "Anchor value to paginate from (exclusive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "direction",
+            "required": false,
+            "in": "query",
+            "description": "Pagination direction",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "next",
+                "prev",
+                "center"
+              ],
+              "default": "next"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Number of items (default 50, max 200)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "tags": [
+          "Chat support"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {
+            "JWTBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedConversationResponseList"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Bad Request",
+            "x-stapel-errors": [
+              "error.400.chat_kind_disabled"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": "Forbidden",
+            "x-stapel-errors": [
+              "error.403.chat_not_operator"
+            ]
+          }
+        },
+        "x-stapel-pagination": {
+          "style": "anchor",
+          "items": "items",
+          "params": [
+            "anchor",
+            "direction",
+            "limit"
+          ]
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActivityRequest": {
+        "type": "object",
+        "description": "Announce what the caller is doing right now.",
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "A name from the open activity registry — ``typing``,"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "ActivityResponse": {
+        "type": "object",
+        "description": "The announced activity and how long a client shows it.",
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "A registered activity state, e.g. typing."
+          },
+          "ttl_s": {
+            "type": "integer",
+            "description": "Seconds the state stays shown without a refresh."
+          }
+        },
+        "required": [
+          "state",
+          "ttl_s"
+        ]
+      },
+      "AttachmentResponse": {
+        "type": "object",
+        "description": "One attachment, carrying everything a bubble needs to paint on first\nframe — no second round trip, and no reflow when the asset lands.\n\nEvery field is present on every attachment, ``null`` where it does not\napply or the CDN has not produced it yet; which of them a given ``type``\nis expected to populate is declared by the attachment-type registry\n(:mod:`stapel_chat.attachments`), which is open — a sticker is a settings\nline, not a release.\n\nThe names are **stapel-cdn's** (`cdn.describe`), because they name the\nsame things and two vocabularies for one thing is how a seam rots.",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Opaque CDN ref (``<type>/<hash>``). The only field this module"
+          },
+          "type": {
+            "type": "string",
+            "description": "Registry type, and the CDN's media ``kind``: ``image`` / ``gif``"
+          },
+          "mime": {
+            "type": "string",
+            "nullable": true,
+            "description": "Content type"
+          },
+          "bytes": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Byte size of the original"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "description": "Original filename (documents)"
+          },
+          "ext": {
+            "type": "string",
+            "nullable": true,
+            "description": "Lowercase extension (documents)"
+          },
+          "width": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Pixel width (image/gif/video)"
+          },
+          "height": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Pixel height (image/gif/video)"
+          },
+          "aspect": {
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "description": "``width / height`` — the number that reserves the box before"
+          },
+          "square": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Whether the asset is square within a pixel"
+          },
+          "animated": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Whether it moves, so a UI offers a play affordance rather"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Playback length (audio/video). ``null`` means"
+          },
+          "preview_b64": {
+            "type": "string",
+            "nullable": true,
+            "description": "The inline placeholder as a ``data:image/webp;base64,…``"
+          },
+          "preview_kind": {
+            "type": "string",
+            "nullable": true,
+            "description": "What ``preview_b64`` depicts — ``blur`` (a 16px LQIP),"
+          },
+          "poster_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "A video's full poster image, present only once the poster"
+          },
+          "meta_status": {
+            "type": "string",
+            "description": "``ok`` / ``partial`` / ``missing``"
+          },
+          "meta_reason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Why, whenever the status is not ``ok``"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "Per-tier CDN geometry ``[{tier, branch, url, width,"
+          },
+          "href": {
+            "type": "string",
+            "nullable": true,
+            "description": "This module's stable link to the attachment"
+          }
+        },
+        "required": [
+          "key",
+          "type"
+        ]
+      },
+      "ConversationResponse": {
+        "type": "object",
+        "description": "A conversation (thread).",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Conversation id (UUID)"
+          },
+          "kind": {
+            "type": "string",
+            "description": "``direct`` / ``group`` / ``support``"
+          },
+          "scope_key": {
+            "type": "string",
+            "description": "Opaque host scope (workspace/org/tenant)"
+          },
+          "support_status": {
+            "type": "string",
+            "description": "``open`` / ``pending`` / ``resolved`` (empty for"
+          },
+          "last_seq": {
+            "type": "integer",
+            "description": "High-water mark of message seq in this conversation"
+          },
+          "unread_count": {
+            "type": "integer",
+            "description": "Messages newer than the requesting user's read marker,"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last-activity time"
+          },
+          "stream_key": {
+            "type": "string",
+            "description": "The realtime stream this conversation lives on"
+          },
+          "socket_path": {
+            "type": "string",
+            "description": "Where to open it (``ws/chat/<id>``), relative to the"
+          },
+          "assigned_operator_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Assigned support operator, if any"
+          },
+          "subject": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SubjectResponse"
+              }
+            ],
+            "nullable": true,
+            "description": "What the thread is about, with its rendered card inlined —"
+          },
+          "last_message": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LastMessageResponse"
+              }
+            ],
+            "nullable": true,
+            "description": "The line this row draws under the title, or ``null``"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParticipantResponse"
+            },
+            "description": "The conversation's participants"
+          },
+          "left_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When the REQUESTING user left this thread — ``null`` while"
+          },
+          "cleared_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Where the REQUESTING user's history of this thread starts"
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "kind",
+          "last_seq",
+          "scope_key",
+          "support_status",
+          "unread_count",
+          "updated_at"
+        ]
+      },
+      "CreateConversationRequest": {
+        "type": "object",
+        "description": "Create a conversation.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "``direct`` / ``group`` / ``support``. For ``direct`` supply"
+          },
+          "participant_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Other participants to add (the requesting user is"
+          },
+          "subject_type": {
+            "type": "string",
+            "description": "What this thread is about, by registered type. Supply"
+          },
+          "subject_key": {
+            "type": "string",
+            "description": "The opaque key within that type. Never parsed here"
+          },
+          "scope_key": {
+            "type": "string",
+            "description": "Ignored — the scope is resolved server-side from the"
+          }
+        }
+      },
+      "LastMessageResponse": {
+        "type": "object",
+        "description": "The one line an inbox row draws under the title.\n\nA projection, not a message: enough to PAINT the row, and deliberately not\nenough to stand in for the thread (no id, no attachment DESCRIPTORS — only\ntheir types and how many — no revision cursor; a client that wants those\nopens the conversation). It is annotated\nfor a whole page in the same query the list already costs, because the\nalternative a client is otherwise driven to — ``GET /messages?limit=1`` per\nrow — is fifty requests for a fifty-row inbox.",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "description": "That message's position in the thread — the newest one in it"
+          },
+          "kind": {
+            "type": "string",
+            "description": "``text`` or ``system``"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was posted — what the row timestamps"
+          },
+          "sender_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Author's user id, or null for a system line"
+          },
+          "body_preview": {
+            "type": "string",
+            "nullable": true,
+            "description": "The text the row DRAWS for that line, or ``null``"
+          },
+          "preview_reason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Which of the three ``null`` cases this is, or"
+          },
+          "attachment_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The DISTINCT attachment types the last message"
+          },
+          "attachment_count": {
+            "type": "integer",
+            "description": "How many attachments that message carries — the"
+          }
+        },
+        "required": [
+          "created_at",
+          "kind",
+          "seq"
+        ]
+      },
+      "MarkReadRequest": {
+        "type": "object",
+        "description": "Advance the requesting user's read/delivery markers.",
+        "properties": {
+          "upto_seq": {
+            "type": "integer",
+            "description": "seq of the newest message now considered read"
+          },
+          "delivered_upto_seq": {
+            "type": "integer",
+            "description": "seq of the newest message the client holds. Omit"
+          }
+        },
+        "required": [
+          "upto_seq"
+        ]
+      },
+      "MarkReadResponse": {
+        "type": "object",
+        "description": "Whether each marker moved (a marker never goes backwards).",
+        "properties": {
+          "updated": {
+            "type": "boolean",
+            "description": "The read marker moved."
+          },
+          "delivered": {
+            "type": "boolean",
+            "description": "The delivery marker moved."
+          }
+        },
+        "required": [
+          "delivered",
+          "updated"
+        ]
+      },
+      "MessageResponse": {
+        "type": "object",
+        "description": "A single message — or its tombstone.\n\nA deleted message is still returned: same ``id``, same ``seq``, empty\n``body``, empty ``attachments``, ``deleted=true``. That is deliberate, and\nit is what a client cache needs — an id that stops arriving is an id\nnobody can purge.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Message id (UUID)"
+          },
+          "conversation_id": {
+            "type": "string",
+            "description": "Owning conversation id"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "Position in the thread. Immutable — sort by this"
+          },
+          "rev_seq": {
+            "type": "integer",
+            "description": "Position in the conversation's revision journal; changes on"
+          },
+          "kind": {
+            "type": "string",
+            "description": "``text`` or ``system``"
+          },
+          "body": {
+            "type": "string",
+            "description": "Message text (empty when only attachments are present, and"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time (tz-aware ISO 8601)"
+          },
+          "sender_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Author's user id (null for system messages)"
+          },
+          "reply_to": {
+            "type": "string",
+            "nullable": true,
+            "description": "Quoted message id, if any"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentResponse"
+            },
+            "description": "Render descriptors (see :class:`AttachmentResponse`)"
+          },
+          "client_msg_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "The sender's own idempotency key, echoed back so an"
+          },
+          "edited": {
+            "type": "boolean",
+            "description": "Whether the body was changed after posting"
+          },
+          "edited_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When it was changed (null if never)"
+          },
+          "deleted": {
+            "type": "boolean",
+            "description": "Whether this is a tombstone"
+          },
+          "deleted_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When it was deleted (null if live)"
+          }
+        },
+        "required": [
+          "body",
+          "conversation_id",
+          "created_at",
+          "id",
+          "kind",
+          "rev_seq",
+          "seq"
+        ]
+      },
+      "PaginatedConversationResponseList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversationResponse"
+            }
+          },
+          "next_anchor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "nullable": true,
+            "example": null,
+            "description": "Anchor value for next page. The raw value of the ordering field: a string for a datetime anchor, an integer for a sequence one. Set `anchor_type` on the paginator to narrow this."
+          },
+          "prev_anchor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "nullable": true,
+            "example": null,
+            "description": "Anchor value for previous page. The raw value of the ordering field: a string for a datetime anchor, an integer for a sequence one. Set `anchor_type` on the paginator to narrow this."
+          },
+          "has_next": {
+            "type": "boolean",
+            "description": "Whether there are more items after this page",
+            "example": false
+          },
+          "has_prev": {
+            "type": "boolean",
+            "description": "Whether there are items before this page",
+            "example": false
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of items in current page",
+            "example": 1
+          }
+        },
+        "required": [
+          "items",
+          "has_next",
+          "has_prev",
+          "count"
+        ],
+        "x-stapel-pagination": {
+          "style": "anchor",
+          "items": "items"
+        }
+      },
+      "PaginatedMessageResponseList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            }
+          },
+          "next_anchor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "nullable": true,
+            "example": null,
+            "description": "Anchor value for next page. The raw value of the ordering field: a string for a datetime anchor, an integer for a sequence one. Set `anchor_type` on the paginator to narrow this."
+          },
+          "prev_anchor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "nullable": true,
+            "example": null,
+            "description": "Anchor value for previous page. The raw value of the ordering field: a string for a datetime anchor, an integer for a sequence one. Set `anchor_type` on the paginator to narrow this."
+          },
+          "has_next": {
+            "type": "boolean",
+            "description": "Whether there are more items after this page",
+            "example": false
+          },
+          "has_prev": {
+            "type": "boolean",
+            "description": "Whether there are items before this page",
+            "example": false
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of items in current page",
+            "example": 1
+          }
+        },
+        "required": [
+          "items",
+          "has_next",
+          "has_prev",
+          "count"
+        ],
+        "x-stapel-pagination": {
+          "style": "anchor",
+          "items": "items"
+        }
+      },
+      "ParticipantResponse": {
+        "type": "object",
+        "description": "A conversation participant.",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "The participant's user id"
+          },
+          "role": {
+            "type": "string",
+            "description": "``member`` or ``operator``"
+          },
+          "last_read_seq": {
+            "type": "integer",
+            "description": "seq of the newest message this participant has read"
+          },
+          "last_delivered_seq": {
+            "type": "integer",
+            "description": "seq of the newest message their client"
+          },
+          "online": {
+            "type": "boolean",
+            "description": "Whether THIS participant is connected right now — a"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When they were last connected or active. What a header"
+          },
+          "online_until": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When this ``online`` stops being believable — the lease"
+          },
+          "left_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When this participant LEFT the thread, or ``null`` while"
+          }
+        },
+        "required": [
+          "last_read_seq",
+          "role",
+          "user_id"
+        ]
+      },
+      "PatchedEditMessageRequest": {
+        "type": "object",
+        "description": "Replace a message's body. Author only.",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The new text. An edit cannot empty a message — deleting is the"
+          }
+        }
+      },
+      "SendMessageRequest": {
+        "type": "object",
+        "description": "Post a message.\n\nThere is deliberately **no draft**. A compose box is client state; the\nserver has one verb, and it is \"send\". A server-side draft concept would\nput a save round trip between the Enter key and the message, which is\nprecisely the thing that must not exist.",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "Message text (required unless attachments are supplied)"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "type"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string",
+                      "description": "Attachment type from the OPEN registry — image / gif / video / audio / file out of the box, plus whatever STAPEL_CHAT['ATTACHMENT_TYPES'] adds."
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                {
+                  "type": "string",
+                  "description": "Bare CDN ref (pre-0.3 form)."
+                }
+              ]
+            }
+          },
+          "reply_to": {
+            "type": "string",
+            "nullable": true,
+            "description": "Message id being replied to (must be in this conversation)"
+          },
+          "client_msg_id": {
+            "type": "string",
+            "description": "Sender-generated idempotency key. Retrying the same"
+          }
+        }
+      },
+      "StapelError": {
+        "type": "object",
+        "description": "Structured error returned by all Stapel API endpoints.",
+        "properties": {
+          "localizable_error": {
+            "type": "string",
+            "description": "Translation key for client-side localization",
+            "example": "error.404.not_found"
+          },
+          "error": {
+            "type": "string",
+            "description": "Human-readable fallback/debug message — not reliably English,"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Context values for template placeholders",
+            "example": {
+              "retry_after": 30
+            }
+          },
+          "error_language": {
+            "type": "string",
+            "description": "The language `error` is written in (e.g. 'en', 'ru'),"
+          }
+        },
+        "required": [
+          "error",
+          "localizable_error"
+        ]
+      },
+      "SubjectResponse": {
+        "type": "object",
+        "description": "What a conversation is about, and the card somebody else rendered.\n\nThe ``(type, key)`` pair is this module's; the ``card`` is not — it is\nwhatever the subject type's ``card_function`` answered, passed through\nuntouched. Chat does not know what a listing is and never will, so it\nstores a name and asks the owner.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Registered subject type (``listing``, …)"
+          },
+          "key": {
+            "type": "string",
+            "description": "Opaque key within that type"
+          },
+          "card": {
+            "type": "object",
+            "additionalProperties": {},
+            "nullable": true,
+            "description": "The provider's card, or ``null`` when there is none to show"
+          },
+          "meta_status": {
+            "type": "string",
+            "description": "``ok`` / ``partial`` / ``missing`` — the attachment"
+          },
+          "meta_reason": {
+            "type": "string",
+            "nullable": true,
+            "description": "``subject_type_unregistered`` /"
+          }
+        },
+        "required": [
+          "key",
+          "type"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "JWTBearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT access token in the `Authorization: Bearer <token>` header — the credential a native client sends. When the JWT cookie is also present, the cookie wins."
+      },
+      "JWTCookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "stapel_jwt",
+        "description": "JWT token stored in cookie. Login via /auth/admin/ to get the cookie."
+      }
+    }
+  }
+}

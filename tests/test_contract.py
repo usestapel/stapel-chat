@@ -40,7 +40,7 @@ DOCS = REPO / "docs"
 TRIAD = ("schema.json", "flows.json", "errors.json")
 # The fifth artifact: docs/llms.txt (badge-canon §3, stapel_tools.llms_txt) —
 # an agent-sized slice of capabilities.json (+ this triad), same discipline.
-ARTIFACTS = TRIAD + ("capabilities.json", "llms.txt")
+ARTIFACTS = TRIAD + ("schema.v2.json", "capabilities.json", "llms.txt")
 
 
 def _llms_budget() -> str:

@@ -30,7 +30,7 @@ jobs:
 
       - name: migration-lint (expand/contract gate, release-management.md §3)
         run: |
-          pip install "stapel-tools>=0.9.1,<1" --quiet
+          pip install "stapel-tools>=0.84.0,<1" --quiet
           stapel-migration-lint . --strict
 
       - name: Import check
@@ -42,6 +42,10 @@ jobs:
       # existed and a sibling was imported anyway.
       - name: Install test dependencies (the declared `test` extra)
         run: pip install -e ".[test]"
+
+      - name: Contract drift (make contract-check, emitted on 3.12)
+        if: matrix.python-version == '3.12'
+        run: make contract-check PYTHON=python
 
       - name: Tests with coverage
         # Strict siblings: a declared sibling that is missing FAILS instead of
@@ -102,7 +106,7 @@ jobs:
 
       - name: migration-lint (expand/contract gate, release-management.md §3)
         run: |
-          pip install "stapel-tools>=0.9.1,<1" --quiet
+          pip install "stapel-tools>=0.84.0,<1" --quiet
           stapel-migration-lint . --strict
 
       - name: Import check

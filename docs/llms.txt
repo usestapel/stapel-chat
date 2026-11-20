@@ -1,8 +1,8 @@
-# stapel-chat 0.12.0
+# stapel-chat 0.12.1
 
 Conversations and messaging over WebSocket: direct (1:1, idempotent by participant pair), group and support threads on one model; realtime send/edit/delete with a monotonic per-conversation seq for order and a separate revision sequence for resume, so an edit or a deletion made while a client was offline reaches it on reconnect; deletion is a tombstone the id keeps arriving under, so client caches and offline databases learn what to purge; attachments carry the render metadata a bubble needs on first paint (aspect, byte size, a 16px base64 thumbnail, voice duration and waveform, document mime and extension) behind an OPEN type registry; typing and activity states, read and delivery receipts as ephemeral signals; a live inbox stream so the conversation list does not poll either; anchor-paginated history and lists; leaving a thread, which hides it for the person who left and takes nothing away from anybody else (their messages, the other party's copy and their own history by id all stay), un-hides on the next message written there, and is undoable (the left threads are listed by ?left=true and put back by POST /conversations/{id}/rejoin, which clears the departure and nothing else); and a support layer (queue, first-come assignment, open/pending/resolved with reopen).
 
-Contract: axes 15 · surface 39 · extension points 9 · operations 17 · error codes 68.
+Contract: axes 15 · surface 39 · extension points 9 · operations 17 · error codes 69.
 Generated from docs/capabilities.json by `stapel-llms-txt` — do not edit; drift-gated by `make contract-check`.
 
 ## Configuration axes — what a product switches on
@@ -80,7 +80,7 @@ This is the answer to "does Stapel already have something for X?". `instead of` 
   Read one message's live content for an external moderation module — body, attachment KEYS, author, conversation. Fetched when it is looked at, so a card shows the message as it is now; a deleted or erased message raises MessageNotFound instead of answering with the empty body a tombstone leaves, because a blank card looks exactly like a message that said nothing.
 - post_system_message — stapel_chat.services.post_system_message
   instead of: stapel_chat.services.post_message
-  Append ONE system line to a conversation on behalf of no user — sender null, kind system, block rules not consulted (there is no sender for a block to be about). Reach for it whenever a sibling service has to record in a thread that something happened outside chat: a call ended, a booking was confirmed, an order shipped. It is deliberately not `post_message` with sender=None spelled out at each call site, because the narrowness is the safety: nothing routed through this — or through the `chat.post_system_message` Function over it — can say something AS a person, in a product where the thread is the record of a deal. The body is a marker key the reader renders (`chat.support.assigned`, `video.call.ended:188`), never a rendered sentence: the reader's locale is not the writer's.
+  Append ONE system line to a conversation on behalf of no user — sender null, kind system, block rules not consulted (there is no sender for a block to be about). Reach for it whenever a sibling service has to record in a thread that something happened outside chat: a call ended, a booking was confirmed, an order shipped. Not `post_message` with sender=None: the narrowness is the safety — nothing routed through this — or through the `chat.post_system_message` Function over it — can say something AS a person, in a product where the thread is the record of a deal. The body is a marker key the reader renders (`chat.support.assigned`, `video.call.ended:188`), never a rendered sentence: the reader's locale is not the writer's.
 - rejoin_conversation — stapel_chat.services.rejoin_conversation
   instead of: stapel_chat.models.ConversationParticipant.objects.update
   A person taking back their departure: clears their own left_at so the thread is on their list again, and nothing else — no read marker moves, no updated_at moves, no system line is posted. Reach for it behind the "return to conversation" control that ?left=true exists to offer; clearing the row by hand is the same call without the idempotence, and marking the thread read to "refresh" it destroys the badge the leaver is coming back for.
@@ -199,7 +199,7 @@ Paths are relative to `/chat/api/v1/`.
 - POST /support/conversations/{conversation_id}/resolve — chat_api_v1_support_conversations_resolve_create
 - GET /support/queue — chat_api_v1_support_queue_list
 
-## Error codes (68) — the StapelError envelope
+## Error codes (69) — the StapelError envelope
 Render `t(code, params)`; branch UX on the remediation. Localized text lives in docs/errors.<lang>.md, not here.
 - error.400.bad_request [400] fix_input
 - error.400.captcha_invalid [400] retry
@@ -232,6 +232,7 @@ Render `t(code, params)`; branch UX on the remediation. Localized text lives in 
 - error.400.field.required [400] fix_input {field}
 - error.400.field.unique [400] fix_input {field}
 - error.400.invalid_ad_id [400] fix_input
+- error.400.too_many_ids [400] fix_input {requested,limit}
 - error.400.validation_error [400] fix_input
 - error.400.verification_failed [400] verify
 - error.400.verification_invalid_factor [400] verify
@@ -263,7 +264,7 @@ Render `t(code, params)`; branch UX on the remediation. Localized text lives in 
 - error.422.unprocessable_entity [422] wait_and_retry
 - error.423.locked [423] wait_and_retry
 - error.423.verification_locked [423] wait_and_retry
-- error.429.rate_limit [429] wait_and_retry {retry_after_minutes}
+- error.429.rate_limit [429] wait_and_retry {retry_after_display,retry_after,retry_after_minutes}
 - error.429.too_many_requests [429] wait_and_retry
 - error.500.internal [500] contact_support
 - error.503.chat_attachment_unavailable [503] retry

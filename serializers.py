@@ -167,3 +167,17 @@ class MarkReadRequestSerializer(StapelDataclassSerializer):
 class ActivityRequestSerializer(StapelDataclassSerializer):
     class Meta:
         dataclass = ActivityRequest
+
+
+class MarkReadResponseSerializer(serializers.Serializer):
+    """Whether each marker moved (a marker never goes backwards)."""
+
+    updated = serializers.BooleanField(help_text="The read marker moved.")
+    delivered = serializers.BooleanField(help_text="The delivery marker moved.")
+
+
+class ActivityResponseSerializer(serializers.Serializer):
+    """The announced activity and how long a client shows it."""
+
+    state = serializers.CharField(help_text="A registered activity state, e.g. typing.")
+    ttl_s = serializers.IntegerField(help_text="Seconds the state stays shown without a refresh.")

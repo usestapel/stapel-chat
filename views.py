@@ -79,10 +79,12 @@ from .realtime import conversation_stream
 from .scope import get_scope_provider
 from .serializers import (
     ActivityRequestSerializer,
+    ActivityResponseSerializer,
     ConversationResponseSerializer,
     CreateConversationRequestSerializer,
     EditMessageRequestSerializer,
     MarkReadRequestSerializer,
+    MarkReadResponseSerializer,
     MessageResponseSerializer,
     SendMessageRequestSerializer,
 )
@@ -1067,7 +1069,7 @@ class MarkReadView(SerializerSeamMixin, APIView):
     permission_classes = [permissions.IsAuthenticated]
     request_serializer_class = MarkReadRequestSerializer
 
-    @extend_schema(request=MarkReadRequestSerializer, responses={200: None})
+    @extend_schema(request=MarkReadRequestSerializer, responses={200: MarkReadResponseSerializer})
     def post(self, request, conversation_id):  # noqa: R007
         conv = _get_conversation(request, conversation_id)
         if conv is None:
@@ -1105,7 +1107,7 @@ class ActivityView(SerializerSeamMixin, APIView):
     permission_classes = [permissions.IsAuthenticated]
     request_serializer_class = ActivityRequestSerializer
 
-    @extend_schema(request=ActivityRequestSerializer, responses={200: None})
+    @extend_schema(request=ActivityRequestSerializer, responses={200: ActivityResponseSerializer})
     def post(self, request, conversation_id):  # noqa: R007
         conv = _get_conversation(request, conversation_id)
         if conv is None:
